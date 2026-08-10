@@ -149,7 +149,7 @@ function toast(msg) {
 /* ------------------------------------------------------------------ ESTADO */
 let MK = nowMK();
 let TAB = 'inicio';
-let F = { card:'ALL', person:'ALL', cat:'ALL', status:'ALL', q:'' };
+let F = { kind:'ALL', card:'ALL', person:'ALL', cat:'ALL', status:'ALL', q:'' };
 
 /* -------------------------------------------------------------- SELETORES */
 const outOf   = k => DB.tx.filter(t=>t.kind==='out' && mk(t.date)===k);
@@ -325,7 +325,7 @@ function vInicio() {
     ${monthbar()}
   </div>
 
-  <div class="grid" style="grid-template-columns:1.25fr .9fr" id="topgrid">
+  <div class="grid g-hero" id="topgrid">
     <div class="hero">
       <div class="hero-in">
         <div class="lab">Saldo real do mês${s.aReceber>0?' · já contando o que têm a te pagar':''}</div>
@@ -605,6 +605,7 @@ function tips() {
 /* ========================================================== VIEW: EXTRATO */
 function vExtrato() {
   let list = DB.tx.filter(t => mk(t.date)===MK);
+  if (F.kind!=='ALL')   list = list.filter(t=>t.kind===F.kind);
   if (F.card!=='ALL')   list = list.filter(t=>t.card===F.card);
   if (F.person!=='ALL') list = list.filter(t=>t.person===F.person);
   if (F.cat!=='ALL')    list = list.filter(t=>t.cat===F.cat);
@@ -623,14 +624,32 @@ function vExtrato() {
     <div class="card tight kpi desk"><div class="clab">Resultado</div><div class="v" style="color:${r-d>=0?'var(--teal)':'var(--coral)'}">${BRL(r-d)}</div></div>
   </div>
 
+  <div class="seg sec" style="max-width:420px">
+    <button type="button" data-kd="ALL" class="${F.kind==='ALL'?'on':''}">Tudo</button>
+    <button type="button" data-kd="out" class="${F.kind==='out'?'on exp':''}">Só despesas</button>
+    <button type="button" data-kd="in"  class="${F.kind==='in'?'on inc':''}">Só receitas</button>
+  </div>
+
   <div class="filters sec">
     <input type="search" id="fq" placeholder="Buscar descrição…" value="${esc(F.q)}" style="flex:1;min-width:150px">
     <select id="fcard"><option value="ALL">Todos os cartões</option>${DB.cards.map(c=>`<option value="${c.id}" ${F.card===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
-    <select id="fper"><option value="ALL">Todas as pessoas</option>${DB.people.map(p=>`<option value="${p.id}" ${F.person===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
-    <select id="fcat"><option value="ALL">Todas as categorias</option>${DB.cats.map(c=>`<option value="${c.id}" ${F.cat===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+    <select id="fper" ${F.kind==='in'?'style="display:none"':''}><option value="ALL">Todas as pessoas</option>${DB.people.map(p=>`<option value="${p.id}" ${F.person===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+    <select id="fcat" ${F.kind==='in'?'style="display:none"':''}><option value="ALL">Todas as categorias</option>${DB.cats.map(c=>`<option value="${c.id}" ${F.cat===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
     <select id="fst"><option value="ALL">Todos</option><option value="PAGO" ${F.status==='PAGO'?'selected':''}>Pagos</option><option value="PENDENTE" ${F.status==='PENDENTE'?'selected':''}>Pendentes</option></select>
     <button class="btn btn-p btn-sm desk" id="addTop">${svg('plus')}Lançar</button>
   </div>
+
+  ${(()=>{ const pend = list.filter(t=>t.status==='PENDENTE'), pagos = list.filter(t=>t.status==='PAGO');
+    if (!list.length) return '';
+    const alvo = filterLabel();
+    return `<div class="batchbar">
+      <div class="bb-txt">${svg('check')}
+        <span><strong>${pend.length}</strong> pendente${pend.length===1?'':'s'}${alvo?` em ${alvo}`:''}
+        ${pend.length?`· <span class="num t-am">${BRL(sum(pend))}</span>`:''}</span></div>
+      <div class="bb-acts">
+        ${pend.length?`<button class="btn btn-sm btn-p" id="markAllPaid">Marcar ${pend.length} como pago</button>`:''}
+        ${pagos.length?`<button class="btn btn-sm btn-g" id="markAllPend">Reabrir ${pagos.length}</button>`:''}
+      </div></div>`; })()}
 
   <div class="card">
     <table class="dt">
@@ -640,6 +659,16 @@ function vExtrato() {
     <div class="mcards">${list.length ? list.map(t=>txRow(t,true)).join('') : `<div class="empty"><span class="e">🔍</span>Nada encontrado com esses filtros.</div>`}</div>
   </div>`;
 }
+function filterLabel() {
+  const p = [];
+  if (F.card!=='ALL')   p.push(card(F.card).name);
+  if (F.person!=='ALL') p.push(person(F.person).name);
+  if (F.cat!=='ALL')    p.push(cat(F.cat).name);
+  if (F.kind==='in')    p.push('receitas');
+  if (F.kind==='out' && !p.length) p.push('despesas');
+  return p.join(' · ');
+}
+
 function txTable(t) {
   const c = cat(t.cat), p = person(t.person), cd = card(t.card), isIn = t.kind==='in';
   return `<tr data-open="${t.id}">
@@ -779,15 +808,18 @@ function waMessage(pid) {
   const jaPagou = recebidoDe(pid, MK);
   const falta = total - jaPagou;
   const byCard = sorted(groupBy(items,'card'));
-  const cardLines = byCard.map(([cid,v]) => {
-    const c = card(cid);
-    const venc = c.due>0 ? ` (vence dia ${c.due})` : '';
-    return `• ${c.name}: ${BRL(v)}${venc}`;
-  }).join('\n');
   const parcelas = items.filter(t=>t.of>1);
-  const topItems = [...items].sort((a,b)=>b.amount-a.amount).slice(0,5)
-    .map(t=>`  - ${t.desc} — ${BRL(t.amount)}`).join('\n');
   const firstCard = byCard.length ? card(byCard[0][0]) : null;
+
+  /* lista COMPLETA, agrupada por cartão e em ordem de data */
+  const blocos = byCard.map(([cid, v]) => {
+    const c = card(cid);
+    const linhas = items.filter(t=>t.card===cid)
+      .sort((a,b)=>a.date.localeCompare(b.date))
+      .map(t=>`${dLabel(t.date)} · ${t.desc} — ${BRL(t.amount)}`)
+      .join('\n');
+    return `*${c.name}* — ${BRL(v)}${c.due>0?` (vence dia ${c.due})`:''}\n${linhas}`;
+  }).join('\n\n');
 
   const msg =
 `Oi, ${p.name}! Tudo bem?
@@ -797,26 +829,41 @@ Fechamento de ${mkLabel(MK, true)} 👇
 *Total no meu cartão: ${BRL(total)}*${jaPagou>0 ? `
 Já recebi: ${BRL(jaPagou)}
 *Falta: ${BRL(falta)}*` : ''}
+${items.length} ${items.length===1?'compra':'compras'}${firstCard && firstCard.close>0 ? ` · fatura fecha dia ${firstCard.close}` : ''}
 
-${cardLines}
-${firstCard && firstCard.close>0 ? `\nA fatura fecha dia ${firstCard.close} e vence dia ${firstCard.due}.` : ''}
-Principais compras:
-${topItems}
-${parcelas.length ? `\nObs: ${parcelas.length} desses lançamentos são parcelas que seguem nos próximos meses.` : ''}
+${blocos}
+${parcelas.length ? `\nObs: ${parcelas.length} ${parcelas.length===1?'lançamento é uma parcela que segue':'lançamentos são parcelas que seguem'} nos próximos meses.` : ''}
 Qualquer dúvida é só chamar. Valeu! 🙏`;
 
   openModal(`
     <div class="mhead"><h2>Cobrar ${esc(p.name)}</h2><button class="ibtn" data-close>${svg('x')}</button></div>
-    <div class="fld"><label>Mensagem (pode editar)</label>
-      <textarea id="waTxt" rows="13" style="font-size:13.5px;line-height:1.55;resize:vertical">${esc(msg)}</textarea></div>
+    <div class="fld"><label>Mensagem — ${items.length} ${items.length===1?'compra':'compras'} (pode editar)</label>
+      <textarea id="waTxt" rows="12" style="font-size:13px;line-height:1.5;resize:vertical">${esc(msg)}</textarea></div>
+    ${msg.length>1400?`<p style="font-size:12px;color:var(--amber);margin:-6px 0 12px;line-height:1.5">
+      A lista está longa (${msg.length} caracteres). Se o WhatsApp cortar, use o comprovante em imagem abaixo.</p>`:''}
     <div class="fld"><label>WhatsApp de ${esc(p.name)}</label>
       <input id="waPhone" inputmode="tel" placeholder="Ex: 22999998888" value="${esc(p.phone||'')}"></div>
     <p style="font-size:11.5px;color:var(--dim);margin:0 0 4px;line-height:1.5">
       Abre o WhatsApp já com a mensagem escrita. Você só confere e toca em enviar.</p>
+    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn btn-sm" id="waImg" style="flex:1;justify-content:center">${svg('down')}Comprovante em imagem</button>
+      <button class="btn btn-sm" id="waCopy" style="flex:1;justify-content:center">${svg('list')}Copiar texto</button>
+    </div>
     <div class="macts">
       <button class="btn btn-g" data-close>Cancelar</button>
       <button class="btn btn-wa" id="waGo">${svg('wa')}Abrir WhatsApp</button>
     </div>`);
+  document.getElementById('waCopy').onclick = ()=>{
+    const txt = document.getElementById('waTxt').value;
+    const ta = document.createElement('textarea'); ta.value = txt;
+    ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta);
+    ta.select();
+    try { (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+      .then(()=>toast('Texto copiado')).catch(()=>{ document.execCommand('copy'); toast('Texto copiado'); }); }
+    catch(e){ document.execCommand('copy'); toast('Texto copiado'); }
+    document.body.removeChild(ta);
+  };
+  document.getElementById('waImg').onclick = ()=>reciboImagem(pid, items, total, jaPagou, falta);
   document.getElementById('waGo').onclick = () => {
     const raw = document.getElementById('waPhone').value.replace(/\D/g,'');
     const txt = encodeURIComponent(document.getElementById('waTxt').value);
@@ -825,6 +872,105 @@ Qualquer dúvida é só chamar. Valeu! 🙏`;
     window.open(`https://wa.me/${num}?text=${txt}`, '_blank');
     closeModal();
   };
+}
+
+/* ------------------------------------------- COMPROVANTE EM IMAGEM (PNG) */
+function reciboImagem(pid, items, total, jaPagou, falta) {
+  const p = person(pid);
+  const W = 900, PAD = 44, ROW = 40, HEAD = 214, FOOT = 96;
+  const byCard = sorted(groupBy(items,'card'));
+  let linhas = 0;
+  byCard.forEach(([cid]) => { linhas += 1 + items.filter(t=>t.card===cid).length; });
+  const H = HEAD + linhas*ROW + byCard.length*18 + FOOT + (jaPagou>0?54:0);
+
+  const cv = document.createElement('canvas');
+  const dpr = 2; cv.width = W*dpr; cv.height = H*dpr;
+  const x = cv.getContext('2d'); x.scale(dpr,dpr);
+  const F = (w,sz,fam) => `${w} ${sz}px ${fam||'Inter, Helvetica, Arial, sans-serif'}`;
+  const MONO = 'ui-monospace, Menlo, Consolas, monospace';
+
+  /* fundo */
+  const bg = x.createLinearGradient(0,0,W,H);
+  bg.addColorStop(0,'#1C1730'); bg.addColorStop(1,'#14111F');
+  x.fillStyle = bg; x.fillRect(0,0,W,H);
+  x.fillStyle = 'rgba(139,92,246,.13)';
+  x.beginPath(); x.arc(W-60,-40,260,0,7); x.fill();
+
+  /* cabeçalho */
+  x.fillStyle = '#9C93B8'; x.font = F(600,15);
+  x.fillText('COMPROVANTE DE GASTOS', PAD, 54);
+  x.fillStyle = '#F1EDFA'; x.font = F(700,40);
+  x.fillText(p.name, PAD, 100);
+  x.fillStyle = '#9C93B8'; x.font = F(500,19);
+  x.fillText(mkLabel(MK, true) + '  ·  ' + items.length + (items.length===1?' compra':' compras'), PAD, 130);
+
+  /* total */
+  x.textAlign = 'right';
+  x.fillStyle = '#9C93B8'; x.font = F(600,14);
+  x.fillText(falta>0.005 && jaPagou>0 ? 'FALTA PAGAR' : 'TOTAL', W-PAD, 60);
+  x.fillStyle = falta>0.005 ? '#FF8FA6' : '#2ED3B7'; x.font = F(700,42,MONO);
+  x.fillText(BRL(falta>0.005?falta:total), W-PAD, 104);
+  if (jaPagou > 0) { x.fillStyle='#9C93B8'; x.font=F(500,15);
+    x.fillText(`total ${BRL(total)} · já pago ${BRL(jaPagou)}`, W-PAD, 130); }
+  x.textAlign = 'left';
+
+  x.strokeStyle = '#372D54'; x.lineWidth = 1;
+  x.beginPath(); x.moveTo(PAD,164); x.lineTo(W-PAD,164); x.stroke();
+
+  x.fillStyle = '#6F6688'; x.font = F(700,12);
+  x.fillText('DATA', PAD, 192); x.fillText('DESCRIÇÃO', PAD+92, 192);
+  x.textAlign='right'; x.fillText('VALOR', W-PAD, 192); x.textAlign='left';
+
+  /* linhas */
+  let y = HEAD + 14;
+  byCard.forEach(([cid, v]) => {
+    const c = card(cid);
+    x.fillStyle = c.c1; x.beginPath();
+    x.roundRect ? x.roundRect(PAD, y-17, 5, 22, 3) : x.rect(PAD, y-17, 5, 22); x.fill();
+    x.fillStyle = '#F1EDFA'; x.font = F(700,17);
+    x.fillText(c.name, PAD+16, y);
+    x.textAlign='right'; x.fillStyle = '#C3B9DE'; x.font = F(700,17,MONO);
+    x.fillText(BRL(v), W-PAD, y); x.textAlign='left';
+    y += 16;
+    items.filter(t=>t.card===cid).sort((a,b)=>a.date.localeCompare(b.date)).forEach((t,i) => {
+      y += ROW;
+      if (i%2===0) { x.fillStyle='rgba(255,255,255,.028)';
+        x.fillRect(PAD-8, y-26, W-2*PAD+16, ROW-4); }
+      x.fillStyle = '#8E86A8'; x.font = F(500,15,MONO);
+      x.fillText(dLabel(t.date), PAD, y);
+      x.fillStyle = '#EDE9F7'; x.font = F(500,16);
+      let d = t.desc || '';
+      const maxW = W - 2*PAD - 92 - 150;
+      while (x.measureText(d).width > maxW && d.length > 4) d = d.slice(0,-2);
+      if (d !== (t.desc||'')) d += '…';
+      x.fillText(d, PAD+92, y);
+      x.textAlign='right'; x.fillStyle='#F1EDFA'; x.font=F(600,16,MONO);
+      x.fillText(BRL(t.amount), W-PAD, y); x.textAlign='left';
+    });
+    y += 20;
+  });
+
+  /* rodapé */
+  x.strokeStyle = '#372D54';
+  x.beginPath(); x.moveTo(PAD,y+6); x.lineTo(W-PAD,y+6); x.stroke();
+  x.fillStyle = '#6F6688'; x.font = F(500,14);
+  const hoje = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  x.fillText('Gerado em ' + hoje, PAD, y+38);
+  x.textAlign='right'; x.fillText('Fatura · controle financeiro', W-PAD, y+38); x.textAlign='left';
+
+  cv.toBlob(b => {
+    const nome = `cobranca-${p.name.toLowerCase().replace(/\s+/g,'-')}-${MK}.png`;
+    const f = new File([b], nome, { type:'image/png' });
+    if (navigator.canShare && navigator.canShare({ files:[f] })) {
+      navigator.share({ files:[f], title:`Gastos ${p.name}` })
+        .then(()=>toast('Comprovante compartilhado')).catch(()=>{});
+    } else {
+      const u = URL.createObjectURL(b);
+      const a = document.createElement('a'); a.href=u; a.download=nome; a.click();
+      setTimeout(()=>URL.revokeObjectURL(u),1500);
+      toast('Imagem baixada — anexe no WhatsApp');
+    }
+  }, 'image/png');
 }
 
 /* ========================================================= VIEW: PREVISÃO */
@@ -871,6 +1017,45 @@ function vPrevisao() {
     </div>
     ${mediaRec>0?`<p style="font-size:11.5px;color:var(--dim);margin:14px 0 0">A linha verde marca sua receita média. Barras que a ultrapassam são meses em que o que já está comprometido supera o que costuma entrar.</p>`:''}
   </div>
+
+  ${(()=>{
+    const keys = fut.map(f=>f.k);
+    const pessoas = DB.people.map(p => {
+      const vals = keys.map(k => sum(outOf(k).filter(t=>t.person===p.id)));
+      return { p, vals, tot: vals.reduce((a,b)=>a+b,0) };
+    }).filter(r=>r.tot>0).sort((a,b)=>b.tot-a.tot);
+    if (!pessoas.length) return '';
+    const maxP = Math.max(1, ...pessoas.flatMap(r=>r.vals));
+    return `<div class="card sec">
+      <div class="row-between" style="margin-bottom:6px"><h3>Previsão por pessoa</h3>
+        <span style="font-size:12px;color:var(--dim)">próximos 12 meses</span></div>
+      <p style="font-size:12px;color:var(--dim);margin:0 0 16px;line-height:1.5">
+        Quanto de cada mês futuro já está comprometido por quem — útil pra saber o que vai
+        cair no seu bolso e o que vai voltar como reembolso.</p>
+
+      ${pessoas.map(r=>`
+        <div style="margin-bottom:18px">
+          <div class="row-between" style="margin-bottom:9px">
+            <span style="display:flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600">
+              <span class="pbadge" style="width:24px;height:24px;border-radius:8px;font-size:11px;background:${r.p.color}">${esc(r.p.name[0])}</span>
+              ${esc(r.p.name)}
+              ${(r.p.owner||r.p.reembolsa===false)?'<span class="tag">gasto seu</span>':'<span class="tag parc">reembolsa</span>'}
+            </span>
+            <span class="num" style="font-size:14px;font-weight:700">${BRL(r.tot)}</span></div>
+          <div class="sparkrow">
+            ${r.vals.map((v,i)=>`<div class="sparkcol" title="${mkLabel(keys[i],true)}: ${BRL(v)}">
+              <div class="sparkbar" style="height:${v>0?Math.max(4,v/maxP*100):2}%;background:${v>0?r.p.color:'var(--panel3)'}"></div>
+              <span>${mkLabel(keys[i]).split(' ')[0]}</span></div>`).join('')}
+          </div>
+        </div>`).join('')}
+
+      <div class="row-between" style="padding-top:14px;border-top:1px solid var(--line-soft);font-size:13px">
+        <span style="color:var(--muted)">Seu, de fato (sem os reembolsáveis)</span>
+        <span class="num" style="font-weight:700">${BRL(pessoas.filter(r=>r.p.owner||r.p.reembolsa===false).reduce((a,b)=>a+b.tot,0))}</span></div>
+      <div class="row-between" style="font-size:13px;margin-top:8px">
+        <span style="color:var(--muted)">Deve voltar como reembolso</span>
+        <span class="num t-sk" style="font-weight:700">${BRL(pessoas.filter(r=>!r.p.owner&&r.p.reembolsa!==false).reduce((a,b)=>a+b.tot,0))}</span></div>
+    </div>`; })()}
 
   <div class="card sec">
     <div class="row-between" style="margin-bottom:12px"><h3>Parcelamentos em aberto</h3>
@@ -1514,6 +1699,36 @@ function wire(el) {
   const q = el.querySelector('#fq');
   if (q) { q.oninput = e => { F.q = e.target.value; const p=e.target.selectionStart; render();
     const n = document.querySelector('#fq'); if(n){ n.focus(); n.setSelectionRange(p,p);} }; }
+  el.querySelectorAll('[data-kd]').forEach(b=>b.onclick=()=>{ F.kind=b.dataset.kd;
+    if (F.kind==='in') { F.person='ALL'; F.cat='ALL'; } render(); });
+
+  const batch = (to) => {
+    let list = DB.tx.filter(t => mk(t.date)===MK);
+    if (F.kind!=='ALL')   list = list.filter(t=>t.kind===F.kind);
+    if (F.card!=='ALL')   list = list.filter(t=>t.card===F.card);
+    if (F.person!=='ALL') list = list.filter(t=>t.person===F.person);
+    if (F.cat!=='ALL')    list = list.filter(t=>t.cat===F.cat);
+    if (F.status!=='ALL') list = list.filter(t=>t.status===F.status);
+    if (F.q) { const q=F.q.toLowerCase(); list = list.filter(t=>(t.desc||'').toLowerCase().includes(q)); }
+    const alvo = list.filter(t=>t.status!==to);
+    if (!alvo.length) return;
+    const nome = filterLabel();
+    openModal(`<div class="mhead"><h2>${to==='PAGO'?'Marcar como pago':'Reabrir lançamentos'}</h2>
+      <button class="ibtn" data-close>${svg('x')}</button></div>
+      <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 6px">
+        ${to==='PAGO'?'Vão ser marcados como pagos':'Voltam a ficar pendentes'}
+        <strong style="color:var(--text)">${alvo.length} lançamentos</strong>${nome?` de <strong style="color:var(--text)">${esc(nome)}</strong>`:''}
+        em ${mkLabel(MK,true)}, somando <strong style="color:var(--text)">${BRL(sum(alvo))}</strong>.</p>
+      <p style="font-size:12.5px;color:var(--dim);margin:0">Dá pra desfazer depois, um a um ou em lote.</p>
+      <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+        <button class="btn btn-p" id="bYes">Confirmar</button></div>`);
+    document.getElementById('bYes').onclick = ()=>{
+      alvo.forEach(t=>{ t.status = to; }); save(); closeModal(); render();
+      toast(`${alvo.length} lançamentos marcados como ${to==='PAGO'?'pagos':'pendentes'}`); };
+  };
+  const mp = el.querySelector('#markAllPaid'); if (mp) mp.onclick = ()=>batch('PAGO');
+  const mr = el.querySelector('#markAllPend'); if (mr) mr.onclick = ()=>batch('PENDENTE');
+
   const bindSel = (id, key) => { const s = el.querySelector(id); if (s) s.onchange = e => { F[key]=e.target.value; render(); }; };
   bindSel('#fcard','card'); bindSel('#fper','person'); bindSel('#fcat','cat'); bindSel('#fst','status');
 
