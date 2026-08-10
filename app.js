@@ -49,14 +49,14 @@ const DEF_CARDS = [
   { id:'DINHEIRO',  name:'Dinheiro',  c1:'#4FBF7C', c2:'#1D5637', brand:'Cash',       close:0,  due:0,  limit:0 },
 ];
 const DEF_PEOPLE = [
-  { id:'GUSTAVO',    name:'Gustavo',    phone:'', color:'#8B5CF6', owner:true },
-  { id:'ALESSANDRO', name:'Alessandro', phone:'', color:'#5AA9F0' },
-  { id:'ALINE',      name:'Aline',      phone:'', color:'#FF5C7A' },
-  { id:'CRISTINA',   name:'Cristina',   phone:'', color:'#FFB020' },
-  { id:'HEITOR',     name:'Heitor',     phone:'', color:'#2ED3B7' },
-  { id:'LUIZ',       name:'Luiz',       phone:'', color:'#E0705A' },
-  { id:'MICHELE',    name:'Michele',    phone:'', color:'#C77DFF' },
-  { id:'OUTROS',     name:'Outros',     phone:'', color:'#8E86A8' },
+  { id:'GUSTAVO',    name:'Gustavo',    phone:'', color:'#8B5CF6', owner:true, reembolsa:false },
+  { id:'ALESSANDRO', name:'Alessandro', phone:'', color:'#5AA9F0', reembolsa:true },
+  { id:'ALINE',      name:'Aline',      phone:'', color:'#FF5C7A', reembolsa:true },
+  { id:'CRISTINA',   name:'Cristina',   phone:'', color:'#FFB020', reembolsa:true },
+  { id:'HEITOR',     name:'Heitor',     phone:'', color:'#2ED3B7', reembolsa:true },
+  { id:'LUIZ',       name:'Luiz',       phone:'', color:'#E0705A', reembolsa:true },
+  { id:'MICHELE',    name:'Michele',    phone:'', color:'#C77DFF', reembolsa:true },
+  { id:'OUTROS',     name:'Outros',     phone:'', color:'#8E86A8', reembolsa:true },
 ];
 const DEF_CATS = [
   { id:'FIXOS',      name:'Fixos',      color:'#5AA9F0', icon:'home'  },
@@ -164,13 +164,42 @@ function monthStats(k) {
   const pend = sum(o.filter(t=>t.status==='PENDENTE'));
   const meus = sum(o.filter(t=>t.person==='GUSTAVO'));
   const outros = desp - meus;
-  return { desp, rec, pend, meus, outros, saldo: rec-desp, n:o.length };
+  const ar = contasAReceber(k);
+  return { desp, rec, pend, meus, outros, saldo: rec-desp,
+           aReceber: ar.falta, saldoPrev: rec - desp + ar.falta, n:o.length };
 }
+/* Quanto cada pessoa deve reembolsar no mês, descontando o que já pagou */
+function recebidoDe(pid, k) {
+  return sum(DB.tx.filter(t => t.kind==='in' && t.from===pid && mk(t.date)===k));
+}
+function aReceberDe(pid, k) {
+  const p = person(pid);
+  if (p.owner || p.reembolsa === false) return { gasto:0, recebido:0, falta:0 };
+  const gasto = sum(outOf(k).filter(t=>t.person===pid));
+  const recebido = recebidoDe(pid, k);
+  return { gasto, recebido, falta: gasto - recebido };
+}
+function contasAReceber(k) {
+  const rows = DB.people.map(p => ({ p, ...aReceberDe(p.id, k) }))
+    .filter(r => r.gasto > 0 || r.recebido > 0);
+  const falta = rows.reduce((a,b)=>a + Math.max(0, b.falta), 0);
+  return { rows: rows.sort((a,b)=>b.falta-a.falta),
+           total: rows.reduce((a,b)=>a+b.gasto,0),
+           recebido: rows.reduce((a,b)=>a+b.recebido,0),
+           falta };
+}
+/* Receita que é realmente sua (exclui reembolso de terceiros) */
+function receitaPropria(k) {
+  return sum(inOf(k).filter(t => !t.from));
+}
+
 function availableToSpend(k) {
   const s = monthStats(k);
+  const ar = contasAReceber(k);
   const meta = +DB.settings.meta || 0;
-  if (meta > 0) return { limit: meta, used: s.desp, left: meta - s.desp, mode:'meta' };
-  return { limit: s.rec, used: s.desp, left: s.rec - s.desp, mode:'receita' };
+  if (meta > 0) return { limit: meta, used: s.desp, left: meta - s.desp, mode:'meta', aReceber: ar.falta };
+  const limit = s.rec + ar.falta;   // o que já entrou + o que ainda vai entrar de terceiros
+  return { limit, used: s.desp, left: limit - s.desp, mode:'receita', aReceber: ar.falta };
 }
 function futureMonths(n) {
   const out = [];
@@ -299,13 +328,19 @@ function vInicio() {
   <div class="grid" style="grid-template-columns:1.25fr .9fr" id="topgrid">
     <div class="hero">
       <div class="hero-in">
-        <div class="lab">Saldo do mês</div>
-        <div class="big ${s.saldo<0?'neg':'pos'}">${BRL(s.saldo)}</div>
+        <div class="lab">Saldo real do mês${s.aReceber>0?' · já contando o que têm a te pagar':''}</div>
+        <div class="big ${s.saldoPrev<0?'neg':'pos'}">${BRL(s.saldoPrev)}</div>
+        ${s.aReceber>0?`<div class="hero-eq">
+          <span>${BRL(s.rec)} recebido</span><b>+</b>
+          <span class="t-sk">${BRL(s.aReceber)} a receber</span><b>−</b>
+          <span class="t-out">${BRL(s.desp)} gasto</span>
+          <em>caixa hoje: ${BRL(s.saldo)}</em>
+        </div>`:''}
         <div class="hero-split">
           <div><div class="l">Receitas</div><div class="v t-in">${BRL(s.rec)}</div></div>
           <div><div class="l">Despesas</div><div class="v t-out">${BRL(s.desp)}</div></div>
           <div><div class="l">Meus gastos</div><div class="v">${BRL(s.meus)}</div></div>
-          <div><div class="l">De terceiros</div><div class="v t-sk">${BRL(s.outros)}</div></div>
+          <div><div class="l">A receber</div><div class="v t-sk">${BRL(s.aReceber)}</div></div>
         </div>
       </div>
     </div>
@@ -322,7 +357,8 @@ function vInicio() {
           <div class="mid"><div class="v" style="color:${leftColor}">${BRL(av.left)}</div><div class="l">restam</div></div>
         </div>
         <ul class="gauge-info">
-          <li><span class="k">${av.mode==='meta'?'Meta do mês':'Receita do mês'}</span><span class="n">${BRL(av.limit)}</span></li>
+          <li><span class="k">${av.mode==='meta'?'Meta do mês':'Entradas previstas'}</span><span class="n">${BRL(av.limit)}</span></li>
+          ${av.aReceber>0&&av.mode!=='meta'?`<li><span class="k" style="padding-left:10px;font-size:12px">↳ ainda a receber</span><span class="n t-sk" style="font-size:12.5px">${BRL(av.aReceber)}</span></li>`:''}
           <li><span class="k">Já gasto</span><span class="n t-out">${BRL(av.used)}</span></li>
           <li><span class="k">Pendente</span><span class="n t-am">${BRL(s.pend)}</span></li>
           <li><span class="k">Comprometido</span><span class="n">${pct}%</span></li>
@@ -334,7 +370,7 @@ function vInicio() {
   <div class="card sec">
     <div class="row-between" style="margin-bottom:12px"><h3>Seus cartões em ${mkLabel(MK)}</h3>
       <button class="link" data-go2="cartoes">detalhes</button></div>
-    <div class="cardstack">${DB.cards.map(c=>cardTile(c)).join('')}</div>
+    ${cardStack()}
   </div>
 
   <div class="two sec">
@@ -365,6 +401,25 @@ function vInicio() {
     </div>
   </div>
 
+  ${(()=>{ const ar = contasAReceber(MK); if (!ar.total) return '';
+    return `<div class="card sec">
+      <div class="row-between" style="margin-bottom:12px">
+        <h3>A receber de terceiros</h3>
+        <span class="num" style="font-size:16px;font-weight:800;color:${ar.falta>0?'var(--sky)':'var(--teal)'}">${BRL(ar.falta)}</span></div>
+      ${ar.rows.map(r=>{ const pc = r.gasto>0 ? Math.min(100, Math.round(r.recebido/r.gasto*100)) : 100;
+        return `<div class="brow"><div class="t"><span class="nm">
+          <span class="pbadge" style="width:24px;height:24px;border-radius:8px;font-size:11px;background:${r.p.color}">${esc(r.p.name[0])}</span>
+          <span>${esc(r.p.name)}</span></span>
+          <span class="vl">${r.falta>0.005?`falta <strong style="color:var(--sky)">${BRL(r.falta)}</strong> de ${BRL(r.gasto)}`
+            :`<strong style="color:var(--teal)">quitado</strong> · ${BRL(r.gasto)}`}</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pc}%;background:${pc>=100?'var(--teal)':r.p.color}"></div></div></div>`;}).join('')}
+      <p style="font-size:11.5px;color:var(--dim);margin:12px 0 0;line-height:1.5">
+        Esses gastos passam no seu cartão mas não são seus. Já entram no saldo real acima como entrada prevista —
+        você não precisa lançar a receita antes da pessoa pagar.</p>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-sm" data-go2="pessoas">${svg('users')}Ver e cobrar</button></div>
+    </div>`; })()}
+
   <div class="two sec">
     <div class="card desk">
       <div class="clab">Receitas × Despesas — 6 meses</div>
@@ -384,7 +439,70 @@ function vInicio() {
   </div>`;
 }
 
+function cardStack() {
+  return `<div class="stackwrap">
+    <button class="stackbtn l" data-scroll="-1" aria-label="Cartões anteriores" hidden>${svg('left',2.4)}</button>
+    <div class="cardstack">${DB.cards.map(c=>cardTile(c)).join('')}</div>
+    <button class="stackbtn r" data-scroll="1" aria-label="Próximos cartões" hidden>${svg('right',2.4)}</button>
+    <div class="stackdots"></div>
+  </div>`;
+}
+
+/* arrastar com o mouse, setas e indicador de posição */
+function bindStack(scope) {
+  scope.querySelectorAll('.stackwrap').forEach(wrap => {
+    const box = wrap.querySelector('.cardstack');
+    const L = wrap.querySelector('[data-scroll="-1"]');
+    const R = wrap.querySelector('[data-scroll="1"]');
+    const dots = wrap.querySelector('.stackdots');
+    const step = () => (box.querySelector('.ctile')?.offsetWidth || 220) + 13;
+
+    const refresh = () => {
+      const over = box.scrollWidth - box.clientWidth;
+      if (L) L.hidden = over < 8 || box.scrollLeft < 8;
+      if (R) R.hidden = over < 8 || box.scrollLeft > over - 8;
+      if (dots) {
+        const per = Math.max(1, Math.round(box.clientWidth / step()));
+        const pages = Math.max(1, Math.ceil(box.children.length / per));
+        const cur = over > 0 ? Math.round(box.scrollLeft / over * (pages-1)) : 0;
+        dots.innerHTML = pages > 1 ? Array.from({length:pages},(_,i)=>`<i class="${i===cur?'on':''}"></i>`).join('') : '';
+      }
+    };
+    box.addEventListener('scroll', refresh, { passive:true });
+    if (L) L.onclick = () => box.scrollBy({ left:-step()*2, behavior:'smooth' });
+    if (R) R.onclick = () => box.scrollBy({ left: step()*2, behavior:'smooth' });
+
+    /* arrastar segurando o mouse */
+    let down=false, sx=0, sl=0, moved=0;
+    box.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'touch') return;      // no toque o scroll nativo já funciona
+      down=true; moved=0; sx=e.clientX; sl=box.scrollLeft;
+      box.classList.add('dragging'); box.setPointerCapture(e.pointerId);
+    });
+    box.addEventListener('pointermove', e => {
+      if (!down) return;
+      const dx = e.clientX - sx; moved = Math.max(moved, Math.abs(dx));
+      box.scrollLeft = sl - dx;
+    });
+    const end = e => { if (!down) return; down=false; box.classList.remove('dragging');
+      try { box.releasePointerCapture(e.pointerId); } catch(_){} refresh(); };
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', end);
+    box.addEventListener('click', e => { if (moved > 6) { e.stopPropagation(); e.preventDefault(); moved=0; } }, true);
+
+    /* roda do mouse na vertical rola o carrossel na horizontal */
+    box.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && box.scrollWidth > box.clientWidth) {
+        e.preventDefault(); box.scrollLeft += e.deltaY;
+      }
+    }, { passive:false });
+
+    requestAnimationFrame(refresh);
+  });
+}
+
 function cardTile(c) {
+  const idx = DB.cards.findIndex(x=>x.id===c.id);
   const f = faturaOf(c.id, MK);
   const isCard = c.close > 0;
   const pctLimit = c.limit>0 ? Math.min(100, Math.round(f.total/c.limit*100)) : null;
@@ -398,6 +516,10 @@ function cardTile(c) {
         <div class="ct-chip"></div></div>
     </div>
     <div class="ct-foot">${isCard ? `Fecha dia ${c.close} · vence dia ${c.due}` : 'Débito imediato'}${pctLimit!=null?` · ${pctLimit}% do limite`:''}</div>
+    <span class="ctmove">
+      <span role="button" tabindex="0" data-mvcard="${c.id}|-1" aria-label="Mover para a esquerda" ${idx===0?'hidden':''}>${svg('left',2.6)}</span>
+      <span role="button" tabindex="0" data-mvcard="${c.id}|1" aria-label="Mover para a direita" ${idx===DB.cards.length-1?'hidden':''}>${svg('right',2.6)}</span>
+    </span>
   </button>`;
 }
 
@@ -541,7 +663,7 @@ function vCartoes() {
   const total = sum(outOf(MK));
   return `
   <div class="phead"><div><h1>Cartões</h1><div class="sub">Faturas de ${mkLabel(MK,true)}</div></div>${monthbar()}</div>
-  <div class="card"><div class="cardstack">${DB.cards.map(c=>cardTile(c)).join('')}</div></div>
+  <div class="card">${cardStack()}</div>
 
   <div class="sec" style="display:flex;flex-direction:column;gap:16px">
   ${DB.cards.map(c => {
@@ -588,13 +710,21 @@ function vPessoas() {
     const v = byPer[p.id]||0;
     const items = list.filter(t=>t.person===p.id);
     const pend = sum(items.filter(t=>t.status==='PENDENTE'));
-    return { p, v, items, pend };
-  }).filter(r=>r.v>0).sort((a,b)=>b.v-a.v);
+    const ar = aReceberDe(p.id, MK);
+    return { p, v, items, pend, ...ar };
+  }).filter(r=>r.v>0 || r.recebido>0).sort((a,b)=>b.v-a.v);
+  const ar = contasAReceber(MK);
 
   return `
   <div class="phead"><div><h1>Pessoas</h1><div class="sub">Quem usou seus cartões em ${mkLabel(MK,true)}</div></div>${monthbar()}</div>
 
-  <div class="card">
+  ${ar.total>0?`<div class="three keep">
+    <div class="card tight kpi"><div class="clab">Gastaram no seu cartão</div><div class="v">${BRL(ar.total)}</div></div>
+    <div class="card tight kpi"><div class="clab">Já te pagaram</div><div class="v t-in">${BRL(ar.recebido)}</div></div>
+    <div class="card tight kpi"><div class="clab">Falta receber</div><div class="v t-sk">${BRL(ar.falta)}</div></div>
+  </div>`:''}
+
+  <div class="card sec">
     <div class="row-between" style="margin-bottom:6px"><h3>Divisão do mês</h3>
       <span class="num" style="font-size:15px;font-weight:700">${BRL(total)}</span></div>
     <div style="display:flex;height:12px;border-radius:8px;overflow:hidden;background:var(--panel2);margin:12px 0 6px">
@@ -619,7 +749,18 @@ function vPessoas() {
         <div style="text-align:right"><div class="num" style="font-size:20px;font-weight:800">${BRL(r.v)}</div>
           <div style="font-size:11px;color:var(--dim)">${mainCard?'via '+esc(mainCard.name):''}</div></div>
       </div>
+      ${(!r.p.owner && r.p.reembolsa!==false) ? `
+        <div style="margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line-soft)">
+          <div class="row-between" style="font-size:12.5px;margin-bottom:8px">
+            <span style="color:var(--muted)">Já pagou <strong class="num t-in">${BRL(r.recebido)}</strong></span>
+            <span style="color:var(--muted)">${r.falta>0.005?`falta <strong class="num t-sk">${BRL(r.falta)}</strong>`
+              :`<strong class="t-in">quitado ✓</strong>`}</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${r.gasto>0?Math.min(100,r.recebido/r.gasto*100):100}%;
+            background:${r.falta>0.005?r.p.color:'var(--teal)'}"></div></div>
+        </div>` : ''}
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        ${(r.p.owner || r.p.reembolsa===false || r.falta<=0.005) ? '' :
+          `<button class="btn btn-p btn-sm" data-recv="${r.p.id}|${r.falta.toFixed(2)}">${svg('down')}Recebi ${BRL(r.falta)}</button>`}
         ${r.p.owner ? '' : `<button class="btn btn-wa btn-sm" data-wa="${r.p.id}">${svg('wa')}Cobrar no WhatsApp</button>`}
         <button class="btn btn-sm" data-pdet="${r.p.id}">Ver compras</button>
         ${r.p.owner ? '' : `<button class="btn btn-sm btn-g" data-pphone="${r.p.id}">${r.p.phone?'Editar número':'Cadastrar número'}</button>`}
@@ -635,6 +776,8 @@ function waMessage(pid) {
   const items = outOf(MK).filter(t=>t.person===pid);
   const total = sum(items);
   if (!total) { toast('Nada para cobrar dessa pessoa em ' + mkLabel(MK)); return; }
+  const jaPagou = recebidoDe(pid, MK);
+  const falta = total - jaPagou;
   const byCard = sorted(groupBy(items,'card'));
   const cardLines = byCard.map(([cid,v]) => {
     const c = card(cid);
@@ -651,7 +794,9 @@ function waMessage(pid) {
 
 Fechamento de ${mkLabel(MK, true)} 👇
 
-*Total no meu cartão: ${BRL(total)}*
+*Total no meu cartão: ${BRL(total)}*${jaPagou>0 ? `
+Já recebi: ${BRL(jaPagou)}
+*Falta: ${BRL(falta)}*` : ''}
 
 ${cardLines}
 ${firstCard && firstCard.close>0 ? `\nA fatura fecha dia ${firstCard.close} e vence dia ${firstCard.due}.` : ''}
@@ -781,13 +926,16 @@ function vConfig() {
   </div>
 
   <div class="card sec">
-    <h3 style="margin-bottom:12px">Cartões</h3>
-    ${DB.cards.map(c=>`<div class="lrow">
+    <div class="row-between" style="margin-bottom:12px"><h3>Cartões</h3>
+      <span style="font-size:11.5px;color:var(--dim)">a ordem aqui é a ordem no início</span></div>
+    ${DB.cards.map((c,i)=>`<div class="lrow">
       <div class="l"><div style="width:38px;height:26px;border-radius:6px;background:linear-gradient(140deg,${c.c1},${c.c2});
         display:grid;place-items:center;font-size:8px;font-weight:800;color:#fff">${esc((c.brand||'').slice(0,4).toUpperCase())}</div>
         <div><div class="tt">${esc(c.name)}</div>
         <div class="ss">${c.close>0?`fecha ${c.close} · vence ${c.due}`:'débito imediato'}${c.limit>0?` · limite ${BRL(c.limit)}`:''}</div></div></div>
       <div style="display:flex;gap:6px">
+        <button class="ibtn" data-mvcard="${c.id}|-1" title="Subir" ${i===0?'disabled style="opacity:.3"':''}>${svg('up')}</button>
+        <button class="ibtn" data-mvcard="${c.id}|1" title="Descer" ${i===DB.cards.length-1?'disabled style="opacity:.3"':''}>${svg('down')}</button>
         <button class="ibtn" data-ecard="${c.id}" title="Editar">${svg('gear')}</button>
         <button class="ibtn" data-rmcard="${c.id}" title="Excluir" style="color:var(--coral)">${svg('trash')}</button>
       </div></div>`).join('')}
@@ -798,8 +946,11 @@ function vConfig() {
     <h3 style="margin-bottom:12px">Pessoas</h3>
     ${DB.people.map(p=>`<div class="lrow">
       <div class="l"><div class="pbadge" style="background:${p.color}">${esc(p.name[0])}</div>
-        <div><div class="tt">${esc(p.name)}</div><div class="ss">${p.phone?esc(p.phone):'sem WhatsApp cadastrado'}${p.owner?' · você':''}</div></div></div>
+        <div><div class="tt">${esc(p.name)}</div><div class="ss">${p.phone?esc(p.phone):'sem WhatsApp cadastrado'}${p.owner?' · você':''}
+          ${p.owner?'':`· <span class="tag ${p.reembolsa===false?'':'parc'}">${p.reembolsa===false?'gasto seu':'te reembolsa'}</span>`}</div></div></div>
       <div style="display:flex;gap:6px">
+        ${p.owner?'':`<button class="ibtn" data-reemb="${p.id}" title="${p.reembolsa===false?'Marcar que te reembolsa':'Marcar que NÃO te reembolsa'}"
+          style="color:${p.reembolsa===false?'var(--dim)':'var(--sky)'}">${svg('down')}</button>`}
         <button class="ibtn" data-pphone="${p.id}" title="WhatsApp">${svg('wa')}</button>
         ${p.owner?'':`<button class="ibtn" data-rmper="${p.id}" title="Excluir" style="color:var(--coral)">${svg('trash')}</button>`}
       </div></div>`).join('')}
@@ -832,9 +983,9 @@ function vConfig() {
 }
 
 /* ================================================== LANÇAMENTO (MODAL) */
-function txModal(kind) {
+function txModal(kind, opts) {
   let K = kind || 'out';
-  let sel = { cat:'DIVERSOS', card:'NUBANK', person:'GUSTAVO', parc:1, mode:'total' };
+  let sel = { cat:'DIVERSOS', card:'NUBANK', person:'GUSTAVO', parc:1, mode:'total', from: (opts&&opts.from)||'' };
 
   const body = () => `
     <div class="mhead"><h2>${K==='in'?'Nova receita':'Novo lançamento'}</h2>
@@ -846,7 +997,8 @@ function txModal(kind) {
     </div>
 
     <div class="fld"><label>Valor</label>
-      <input type="number" inputmode="decimal" step="0.01" min="0" id="tAmt" class="amount-in" placeholder="0,00" autofocus></div>
+      <input type="number" inputmode="decimal" step="0.01" min="0" id="tAmt" class="amount-in" placeholder="0,00"
+        value="${opts&&opts.amount?opts.amount:''}" autofocus></div>
 
     <div class="fld"><label>Descrição</label>
       <input type="text" id="tDesc" placeholder="${K==='in'?'Ex: Salário, venda, reembolso':'Ex: Mercado, farmácia, uber'}"></div>
@@ -885,6 +1037,15 @@ function txModal(kind) {
       </div>
       <p id="parcPrev" style="font-size:12.5px;color:var(--muted);margin:-4px 0 14px;text-align:center"></p>
     </div>` : `
+    <div class="fld"><label>De quem veio</label>
+      <div class="chips" id="fromChips">
+        <button type="button" class="chip ${!sel.from?'on':''}" data-fr="">${svg('wallet')}Receita própria</button>
+        ${DB.people.filter(p=>!p.owner && p.reembolsa!==false).map(p=>`<button type="button" class="chip ${sel.from===p.id?'on':''}" data-fr="${p.id}">
+          <span class="cdot" style="background:${p.color}"></span>${esc(p.name)}</button>`).join('')}
+      </div>
+      <p style="font-size:11.5px;color:var(--dim);margin:8px 0 0;line-height:1.5">
+        Reembolso de terceiro abate o que a pessoa te deve. Receita própria soma normal.</p></div>
+
     <div class="fld"><label>Tipo</label>
       <div class="seg"><button type="button" data-fx="0" class="on">Variável</button><button type="button" data-fx="1">Fixa (todo mês)</button></div></div>
     <div class="fld" id="repWrap" style="display:none"><label>Repetir por quantos meses</label>
@@ -932,6 +1093,8 @@ function txModal(kind) {
     };
     M.querySelectorAll('[data-pm]').forEach(b=>b.onclick=()=>{ sel.mode=b.dataset.pm;
       M.querySelectorAll('[data-pm]').forEach(x=>x.classList.toggle('on', x.dataset.pm===sel.mode)); prev(); });
+    M.querySelectorAll('[data-fr]').forEach(b=>b.onclick=()=>{ sel.from=b.dataset.fr;
+      M.querySelectorAll('[data-fr]').forEach(x=>x.classList.toggle('on',x===b)); });
     M.querySelectorAll('[data-fx]').forEach(b=>b.onclick=()=>{
       M.querySelectorAll('[data-fx]').forEach(x=>x.classList.toggle('on', x===b));
       const rw=document.getElementById('repWrap'); if(rw) rw.style.display = b.dataset.fx==='1'?'block':'none'; });
@@ -959,7 +1122,8 @@ function txModal(kind) {
       for (let i=0;i<rep;i++) {
         const k = mkAdd(mk(date), i);
         DB.tx.push({ id:uid(), kind:'in', date:k+'-'+String(Math.min(d,28)).padStart(2,'0'),
-          desc:desc||'Receita', amount:v, card:sel.card, person:'GUSTAVO', cat:'RECEITA', status:'PENDENTE', fixed:isFix });
+          desc:desc||(sel.from?('Reembolso '+person(sel.from).name):'Receita'), amount:v, card:sel.card,
+          person:'GUSTAVO', from:sel.from||'', cat:'RECEITA', status:'PENDENTE', fixed:isFix });
       }
       save(); closeModal(); render();
       toast(rep>1 ? `Receita fixa lançada por ${rep} meses` : 'Receita lançada');
@@ -1321,9 +1485,16 @@ function render() {
 }
 function wire(el) {
   bindMonth(el);
+  bindStack(el);
   el.querySelectorAll('[data-go2]').forEach(b=>b.onclick=()=>go(b.dataset.go2));
   el.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{ F.card=b.dataset.card; go('extrato'); });
   el.querySelectorAll('[data-wa]').forEach(b=>b.onclick=()=>waMessage(b.dataset.wa));
+  el.querySelectorAll('[data-recv]').forEach(b=>b.onclick=()=>{
+    const [pid, amt] = b.dataset.recv.split('|');
+    txModal('in', { from: pid, amount: amt }); });
+  el.querySelectorAll('[data-reemb]').forEach(b=>b.onclick=()=>{
+    const p = DB.people.find(x=>x.id===b.dataset.reemb);
+    if (p) { p.reembolsa = p.reembolsa===false; save(); render(); } });
   el.querySelectorAll('[data-pdet]').forEach(b=>b.onclick=()=>personDetail(b.dataset.pdet));
   el.querySelectorAll('[data-pphone]').forEach(b=>b.onclick=()=>phoneModal(b.dataset.pphone));
   el.querySelectorAll('[data-ecard]').forEach(b=>b.onclick=()=>cardModal(b.dataset.ecard));
@@ -1348,6 +1519,12 @@ function wire(el) {
 
   const at = el.querySelector('#addTop'); if (at) at.onclick = ()=>txModal('out');
   const ai = el.querySelector('#addInc'); if (ai) ai.onclick = ()=>txModal('in');
+  el.querySelectorAll('[data-mvcard]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); e.preventDefault();
+    const [id, dir] = b.dataset.mvcard.split('|');
+    const i = DB.cards.findIndex(x=>x.id===id), j = i + (+dir);
+    if (i<0 || j<0 || j>=DB.cards.length) return;
+    [DB.cards[i], DB.cards[j]] = [DB.cards[j], DB.cards[i]];
+    save(); render(); });
   el.querySelectorAll('[data-rmper]').forEach(b=>b.onclick=()=>removeEntity('person', b.dataset.rmper));
   el.querySelectorAll('[data-rmcard]').forEach(b=>b.onclick=()=>removeEntity('card', b.dataset.rmcard));
   el.querySelectorAll('[data-rmcat]').forEach(b=>b.onclick=()=>removeEntity('cat', b.dataset.rmcat));
