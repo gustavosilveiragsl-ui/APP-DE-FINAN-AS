@@ -111,8 +111,8 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 .gauge-wrap{display:flex;align-items:center;gap:20px}
 .gauge{position:relative;width:132px;height:132px;flex-shrink:0}
 .gauge svg{transform:rotate(-90deg)}
-.gauge .mid{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
-.gauge .mid .v{font-size:19px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-.03em}
+.gauge .mid{position:absolute;inset:0;display:grid;place-content:center;text-align:center;padding:0 6px}
+.gauge .mid .v{font-size:13px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-.04em;white-space:nowrap}
 .gauge .mid .l{font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}
 .gauge-info li{list-style:none;display:flex;justify-content:space-between;gap:16px;font-size:13px;padding:6px 0;
   border-bottom:1px solid var(--line-soft)}
@@ -124,7 +124,7 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 /* ============ CREDIT CARD TILES (signature) ============ */
 .cardstack{display:flex;gap:13px;overflow-x:auto;padding:3px 0 10px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
 .cardstack::-webkit-scrollbar{height:0}
-.ctile{flex:0 0 auto;width:212px;height:130px;border-radius:15px;padding:14px;position:relative;overflow:hidden;
+.ctile{flex:0 0 auto;width:236px;height:132px;border-radius:15px;padding:14px;position:relative;overflow:hidden;
   scroll-snap-align:start;text-align:left;transition:transform .18s,box-shadow .18s;border:1px solid rgba(255,255,255,.14);
   display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 8px 20px rgba(0,0,0,.34)}
 .ctile:hover{transform:translateY(-3px)}
@@ -138,8 +138,8 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 .ctile .ct-chip{width:26px;height:19px;border-radius:4px;background:linear-gradient(140deg,#F5D98A,#C9A24B);
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
 .ctile .ct-lab{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:rgba(255,255,255,.82);font-weight:600}
-.ctile .ct-val{font-size:21px;font-weight:800;font-family:'JetBrains Mono',monospace;color:#fff;letter-spacing:-.03em;margin-top:1px;text-shadow:0 1px 4px rgba(0,0,0,.3)}
-.ctile .ct-foot{font-size:10px;color:rgba(255,255,255,.75);margin-top:5px;font-weight:500}
+.ctile .ct-val{font-size:17.5px;font-weight:800;font-family:'JetBrains Mono',monospace;color:#fff;letter-spacing:-.04em;margin-top:2px;text-shadow:0 1px 4px rgba(0,0,0,.3);white-space:nowrap}
+.ctile .ct-foot{font-size:9.5px;color:rgba(255,255,255,.75);margin-top:5px;font-weight:500}
 .brand-badge{width:34px;height:22px;border-radius:5px;background:rgba(255,255,255,.92);display:grid;place-items:center;
   font-size:8.5px;font-weight:800;letter-spacing:.03em;color:#1a1a1a;font-family:'Inter',sans-serif}
 .ctile.all{background:linear-gradient(140deg,#3B3159,#241E3C)}
