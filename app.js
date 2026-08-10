@@ -520,7 +520,7 @@ function vExtrato() {
 }
 function txTable(t) {
   const c = cat(t.cat), p = person(t.person), cd = card(t.card), isIn = t.kind==='in';
-  return `<tr>
+  return `<tr data-open="${t.id}">
     <td><div style="display:flex;align-items:center;gap:9px">
       <span class="ico sm" style="background:${isIn?'#2ED3B722':c.color+'22'};color:${isIn?'#2ED3B7':c.color}">${svg(isIn?'up':c.icon,2.1)}</span>
       <span>${esc(t.desc)} ${t.of?`<span class="tag parc">${t.n}/${t.of}</span>`:''}</span></div></td>
@@ -532,7 +532,7 @@ function txTable(t) {
     <td class="n" style="color:${isIn?'var(--teal)':'var(--text)'}">${isIn?'+':'−'} ${BRL(t.amount)}</td>
     <td style="text-align:right;white-space:nowrap">
       <button class="ibtn" data-toggle="${t.id}" title="Alternar pago/pendente">${svg('check')}</button>
-      <button class="ibtn" data-del="${t.id}" title="Excluir" style="margin-left:5px">${svg('trash')}</button></td>
+      <button class="ibtn" data-open2="${t.id}" title="Editar / excluir" style="margin-left:5px">${svg('dots')}</button></td>
   </tr>`;
 }
 
@@ -787,7 +787,10 @@ function vConfig() {
         display:grid;place-items:center;font-size:8px;font-weight:800;color:#fff">${esc((c.brand||'').slice(0,4).toUpperCase())}</div>
         <div><div class="tt">${esc(c.name)}</div>
         <div class="ss">${c.close>0?`fecha ${c.close} · vence ${c.due}`:'débito imediato'}${c.limit>0?` · limite ${BRL(c.limit)}`:''}</div></div></div>
-      <button class="ibtn" data-ecard="${c.id}">${svg('gear')}</button></div>`).join('')}
+      <div style="display:flex;gap:6px">
+        <button class="ibtn" data-ecard="${c.id}" title="Editar">${svg('gear')}</button>
+        <button class="ibtn" data-rmcard="${c.id}" title="Excluir" style="color:var(--coral)">${svg('trash')}</button>
+      </div></div>`).join('')}
     <button class="btn btn-sm sec" id="addCard">${svg('plus')}Adicionar cartão</button>
   </div>
 
@@ -796,14 +799,19 @@ function vConfig() {
     ${DB.people.map(p=>`<div class="lrow">
       <div class="l"><div class="pbadge" style="background:${p.color}">${esc(p.name[0])}</div>
         <div><div class="tt">${esc(p.name)}</div><div class="ss">${p.phone?esc(p.phone):'sem WhatsApp cadastrado'}${p.owner?' · você':''}</div></div></div>
-      <button class="ibtn" data-pphone="${p.id}">${svg('wa')}</button></div>`).join('')}
+      <div style="display:flex;gap:6px">
+        <button class="ibtn" data-pphone="${p.id}" title="WhatsApp">${svg('wa')}</button>
+        ${p.owner?'':`<button class="ibtn" data-rmper="${p.id}" title="Excluir" style="color:var(--coral)">${svg('trash')}</button>`}
+      </div></div>`).join('')}
     <button class="btn btn-sm sec" id="addPerson">${svg('plus')}Adicionar pessoa</button>
   </div>
 
   <div class="card sec">
     <h3 style="margin-bottom:12px">Categorias</h3>
-    <div class="chips">${DB.cats.map(c=>`<span class="chip" style="color:${c.color};border-color:${c.color}44">
-      <span class="cdot" style="background:${c.color}"></span>${esc(c.name)}</span>`).join('')}</div>
+    <div class="chips">${DB.cats.map(c=>`<span class="chip" style="color:${c.color};border-color:${c.color}44;padding-right:5px">
+      <span class="cdot" style="background:${c.color}"></span>${esc(c.name)}
+      <button data-rmcat="${c.id}" title="Excluir" style="width:22px;height:22px;border-radius:7px;display:grid;
+        place-items:center;color:var(--dim);margin-left:2px">${svg('x',2.4)}</button></span>`).join('')}</div>
     <button class="btn btn-sm sec" id="addCat">${svg('plus')}Adicionar categoria</button>
   </div>
 
@@ -977,6 +985,155 @@ function txModal(kind) {
   openModal(''); paint();
 }
 
+/* ------------------------------------------------- GRUPOS DE PARCELAS */
+const baseDesc = d => String(d||'').replace(/\s*\(\d+\s*\/\s*\d+\)\s*$/,'').trim();
+function groupOf(t) {
+  if (!t) return [];
+  if (t.grp) { const g = DB.tx.filter(x=>x.grp===t.grp); if (g.length>1) return g; }
+  if (t.of>1) {
+    const b = baseDesc(t.desc);
+    return DB.tx.filter(x => x.kind===t.kind && x.of===t.of && baseDesc(x.desc)===b
+      && x.card===t.card && x.person===t.person);
+  }
+  return [t];
+}
+
+/* ------------------------------------------- DETALHE / EDITAR / EXCLUIR */
+function txDetail(id) {
+  const t = DB.tx.find(x=>x.id===id); if (!t) return;
+  const g = groupOf(t), multi = g.length>1;
+  const c = cat(t.cat), p = person(t.person), cd = card(t.card);
+  const isIn = t.kind==='in';
+  const totalG = sum(g);
+  openModal(`
+    <div class="mhead"><h2>${esc(baseDesc(t.desc)||c.name)}</h2>
+      <button class="ibtn" data-close>${svg('x')}</button></div>
+
+    <div style="display:flex;align-items:center;gap:13px;margin-bottom:16px">
+      <span class="ico" style="width:44px;height:44px;border-radius:14px;background:${isIn?'#2ED3B722':c.color+'22'};color:${isIn?'#2ED3B7':c.color}">${svg(isIn?'up':c.icon)}</span>
+      <div><div class="num" style="font-size:24px;font-weight:800">${isIn?'+':'−'} ${BRL(t.amount)}</div>
+        <div style="font-size:12px;color:var(--dim);margin-top:2px">
+          ${t.of?`parcela ${t.n} de ${t.of}`:'lançamento único'} · ${dLabel(t.date)}</div></div>
+    </div>
+
+    <ul class="gauge-info" style="margin-bottom:16px">
+      <li><span class="k">Cartão</span><span class="n">${esc(cd.name)}</span></li>
+      ${isIn?'':`<li><span class="k">Pessoa</span><span class="n">${esc(p.name)}</span></li>
+      <li><span class="k">Categoria</span><span class="n">${esc(c.name)}</span></li>`}
+      <li><span class="k">Status</span><span class="n" style="color:${t.status==='PAGO'?'var(--teal)':'var(--amber)'}">${t.status==='PAGO'?'pago':'pendente'}</span></li>
+      ${multi?`<li><span class="k">Total do parcelamento</span><span class="n">${BRL(totalG)} em ${g.length}x</span></li>`:''}
+    </ul>
+
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <button class="btn" id="dEdit" style="justify-content:flex-start;padding:14px 16px">${svg('gear')}
+        Editar${multi?' — dá pra aplicar em todas as parcelas':''}</button>
+      <button class="btn" id="dPay" style="justify-content:flex-start;padding:14px 16px">${svg('check')}
+        Marcar como ${t.status==='PAGO'?'pendente':'pago'}</button>
+      <button class="btn" id="dDel1" style="justify-content:flex-start;padding:14px 16px;color:var(--coral)">${svg('trash')}
+        Excluir ${multi?'só esta parcela':'este lançamento'}</button>
+      ${multi?`<button class="btn" id="dDelAll" style="justify-content:flex-start;padding:14px 16px;
+        background:rgba(255,92,122,.14);border-color:rgba(255,92,122,.4);color:var(--coral)">${svg('trash')}
+        Excluir as ${g.length} parcelas — ${BRL(totalG)}</button>`:''}
+    </div>`);
+
+  document.getElementById('dEdit').onclick = ()=>txEdit(id);
+  document.getElementById('dPay').onclick = ()=>{
+    t.status = t.status==='PAGO'?'PENDENTE':'PAGO'; save(); closeModal(); render(); };
+  document.getElementById('dDel1').onclick = ()=>{
+    DB.tx = DB.tx.filter(x=>x.id!==id); save(); closeModal(); render();
+    toast('Lançamento excluído'); };
+  const da = document.getElementById('dDelAll');
+  if (da) da.onclick = ()=>confirmDelGroup(g);
+}
+
+function confirmDelGroup(g) {
+  const ids = new Set(g.map(x=>x.id));
+  const pagos = g.filter(x=>x.status==='PAGO').length;
+  openModal(`<div class="mhead"><h2>Excluir ${g.length} parcelas?</h2>
+    <button class="ibtn" data-close>${svg('x')}</button></div>
+    <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 6px">
+      Isso apaga <strong style="color:var(--text)">${esc(baseDesc(g[0].desc))}</strong> por completo —
+      as ${g.length} parcelas, somando <strong style="color:var(--text)">${BRL(sum(g))}</strong>,
+      de ${mkLabel(mk(g.map(x=>x.date).sort()[0]),true)} até ${mkLabel(mk(g.map(x=>x.date).sort().slice(-1)[0]),true)}.</p>
+    ${pagos?`<p style="font-size:13px;color:var(--amber);margin:0 0 6px">${pagos} ${pagos===1?'parcela já está marcada':'parcelas já estão marcadas'} como paga.</p>`:''}
+    <p style="font-size:12.5px;color:var(--dim);margin:0">Não tem como desfazer.</p>
+    <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+      <button class="btn" id="gYes" style="background:var(--coral);color:#fff;border:none">Excluir tudo</button></div>`);
+  document.getElementById('gYes').onclick = ()=>{
+    DB.tx = DB.tx.filter(x=>!ids.has(x.id)); save(); closeModal(); render();
+    toast(`${g.length} parcelas excluídas`); };
+}
+
+function txEdit(id) {
+  const t = DB.tx.find(x=>x.id===id); if (!t) return;
+  const g = groupOf(t), multi = g.length>1;
+  const isIn = t.kind==='in';
+  let all = multi;
+  openModal(`<div class="mhead"><h2>Editar lançamento</h2>
+      <button class="ibtn" data-close>${svg('x')}</button></div>
+
+    ${multi?`<div class="seg" style="margin-bottom:16px">
+      <button type="button" data-sc="all" class="on">Todas as ${g.length} parcelas</button>
+      <button type="button" data-sc="one">Só esta (${t.n}/${t.of})</button></div>`:''}
+
+    <div class="fld"><label>Descrição</label>
+      <input id="eDesc" value="${esc(multi?baseDesc(t.desc):t.desc)}"></div>
+
+    <div class="fld"><label>Valor ${multi?'de cada parcela':''}</label>
+      <input type="number" step="0.01" min="0" id="eAmt" value="${t.amount}"></div>
+
+    <div class="fld"><label>${isIn?'Entrou em':'Pago com'}</label>
+      <div class="chips" id="eCardChips">${DB.cards.map(c=>`<button type="button" class="chip ${t.card===c.id?'on':''}" data-ecd="${c.id}">
+        <span class="cdot" style="background:${c.c1}"></span>${esc(c.name)}</button>`).join('')}</div></div>
+
+    ${isIn?'':`
+    <div class="fld"><label>Quem comprou</label>
+      <div class="chips" id="ePerChips">${DB.people.map(p=>`<button type="button" class="chip ${t.person===p.id?'on':''}" data-epr="${p.id}">
+        <span class="cdot" style="background:${p.color}"></span>${esc(p.name)}</button>`).join('')}</div></div>
+
+    <div class="fld"><label>Categoria</label>
+      <div class="chips" id="eCatChips">${DB.cats.map(c=>`<button type="button" class="chip ${t.cat===c.id?'on':''}" data-ect="${c.id}">
+        <span class="cdot" style="background:${c.color}"></span>${esc(c.name)}</button>`).join('')}</div></div>`}
+
+    <div class="fld"><label>Data${multi?' da parcela atual (as outras acompanham o mês)':''}</label>
+      <input type="date" id="eDate" value="${t.date}"></div>
+
+    <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+      <button class="btn btn-p" id="eSave">Salvar</button></div>`);
+
+  let nc = t.card, np = t.person, ng = t.cat;
+  const M = document.getElementById('mbody');
+  M.querySelectorAll('[data-sc]').forEach(b=>b.onclick=()=>{ all = b.dataset.sc==='all';
+    M.querySelectorAll('[data-sc]').forEach(x=>x.classList.toggle('on',x===b)); });
+  M.querySelectorAll('[data-ecd]').forEach(b=>b.onclick=()=>{ nc=b.dataset.ecd;
+    M.querySelectorAll('[data-ecd]').forEach(x=>x.classList.toggle('on',x===b)); });
+  M.querySelectorAll('[data-epr]').forEach(b=>b.onclick=()=>{ np=b.dataset.epr;
+    M.querySelectorAll('[data-epr]').forEach(x=>x.classList.toggle('on',x===b)); });
+  M.querySelectorAll('[data-ect]').forEach(b=>b.onclick=()=>{ ng=b.dataset.ect;
+    M.querySelectorAll('[data-ect]').forEach(x=>x.classList.toggle('on',x===b)); });
+
+  document.getElementById('eSave').onclick = ()=>{
+    const nd = document.getElementById('eDesc').value.trim();
+    const na = parseFloat(document.getElementById('eAmt').value);
+    const ndt= document.getElementById('eDate').value || t.date;
+    if (!na || na<=0) { toast('Informe um valor'); return; }
+    const targets = all ? g : [t];
+    const day = ndt.slice(8);
+    const shift = all ? mDiff(mk(t.date), mk(ndt)) : 0;
+    targets.forEach(x => {
+      x.card = nc; if (!isIn) { x.person = np; x.cat = ng; }
+      x.amount = na;
+      if (nd) x.desc = x.of>1 ? `${nd} (${x.n}/${x.of})` : nd;
+      if (all) { x.date = mkAdd(mk(x.date), shift)+'-'+day; }
+      else x.date = ndt;
+    });
+    save(); closeModal(); render();
+    toast(all && multi ? `${targets.length} parcelas atualizadas` : 'Lançamento atualizado');
+  };
+}
+function mDiff(a,b){ const [y1,m1]=a.split('-').map(Number), [y2,m2]=b.split('-').map(Number);
+  return (y2-y1)*12 + (m2-m1); }
+
 /* -------------------------------------------------------- MODAIS AUXILIARES */
 function openModal(html) {
   document.getElementById('mbody').innerHTML = html;
@@ -1075,6 +1232,49 @@ function personDetail(pid) {
     DB.tx = DB.tx.filter(t=>t.id!==b.dataset.del); save(); render(); personDetail(pid); toast('Lançamento excluído'); });
 }
 
+/* --------------------------------------------- EXCLUIR PESSOA/CARTÃO/CATEGORIA */
+function removeEntity(kind, id) {
+  const meta = {
+    person: { list:'people', label:'pessoa', field:'person', fb:'OUTROS',   fbName:'Outros'   },
+    card:   { list:'cards',  label:'cartão', field:'card',   fb:'PIX',      fbName:'Pix'      },
+    cat:    { list:'cats',   label:'categoria', field:'cat', fb:'DIVERSOS', fbName:'Diversos' },
+  }[kind];
+  const arr = DB[meta.list];
+  const obj = arr.find(x=>x.id===id); if (!obj) return;
+  if (arr.length<=1) { toast(`Você precisa de pelo menos ${meta.label==='pessoa'?'uma pessoa':'um '+meta.label}`); return; }
+  const used = DB.tx.filter(t=>t[meta.field]===id);
+  const fb = arr.find(x=>x.id===meta.fb && x.id!==id) || arr.find(x=>x.id!==id);
+
+  openModal(`<div class="mhead"><h2>Excluir ${esc(obj.name)}?</h2>
+    <button class="ibtn" data-close>${svg('x')}</button></div>
+    ${used.length ? `
+      <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 16px">
+        Existem <strong style="color:var(--text)">${used.length} lançamentos</strong>
+        (${BRL(sum(used))}) usando ${esc(obj.name)}. O que fazer com eles?</p>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <button class="btn" id="rMove" style="justify-content:flex-start;padding:14px 16px">
+          ${svg('check')}Mover para <strong style="margin-left:4px">${esc(fb.name)}</strong> e excluir</button>
+        <button class="btn" id="rKill" style="justify-content:flex-start;padding:14px 16px;
+          background:rgba(255,92,122,.14);border-color:rgba(255,92,122,.4);color:var(--coral)">
+          ${svg('trash')}Excluir os ${used.length} lançamentos também</button>
+        <button class="btn btn-g" data-close style="justify-content:flex-start;padding:14px 16px">Cancelar</button>
+      </div>`
+    : `<p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0">
+        Nenhum lançamento usa ${esc(obj.name)}. Pode excluir tranquilo.</p>
+      <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+        <button class="btn" id="rMove" style="background:var(--coral);color:#fff;border:none">Excluir</button></div>`}`);
+
+  const drop = () => { DB[meta.list] = arr.filter(x=>x.id!==id); save(); closeModal(); render(); drawNav(); };
+  document.getElementById('rMove').onclick = ()=>{
+    used.forEach(t=>{ t[meta.field] = fb.id; });
+    drop(); toast(used.length?`${esc(obj.name)} excluído · ${used.length} movidos para ${fb.name}`:`${obj.name} excluído`); };
+  const rk = document.getElementById('rKill');
+  if (rk) rk.onclick = ()=>{
+    const ids = new Set(used.map(t=>t.id));
+    DB.tx = DB.tx.filter(t=>!ids.has(t.id));
+    drop(); toast(`${obj.name} e ${used.length} lançamentos excluídos`); };
+}
+
 /* ------------------------------------------------------------ BACKUP */
 function download(name, content, type) {
   const b = new Blob([content], {type:type||'application/json'});
@@ -1127,11 +1327,18 @@ function wire(el) {
   el.querySelectorAll('[data-pdet]').forEach(b=>b.onclick=()=>personDetail(b.dataset.pdet));
   el.querySelectorAll('[data-pphone]').forEach(b=>b.onclick=()=>phoneModal(b.dataset.pphone));
   el.querySelectorAll('[data-ecard]').forEach(b=>b.onclick=()=>cardModal(b.dataset.ecard));
-  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
-    DB.tx = DB.tx.filter(t=>t.id!==b.dataset.del); save(); render(); toast('Lançamento excluído'); });
-  el.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=()=>{
+  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=e=>{ e.stopPropagation();
+    const t = DB.tx.find(x=>x.id===b.dataset.del); const g = groupOf(t);
+    if (g.length>1) { confirmDelGroup(g); return; }
+    DB.tx = DB.tx.filter(x=>x.id!==b.dataset.del); save(); render(); toast('Lançamento excluído'); });
+  el.querySelectorAll('[data-open2]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); txDetail(b.dataset.open2); });
+  el.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=e=>{ e.stopPropagation();
     const t = DB.tx.find(x=>x.id===b.dataset.toggle);
     if (t) { t.status = t.status==='PAGO'?'PENDENTE':'PAGO'; save(); render(); } });
+  el.querySelectorAll('[data-tx]').forEach(r=>{ r.style.cursor='pointer';
+    r.onclick = e => { if (e.target.closest('button')) return; txDetail(r.dataset.tx); }; });
+  el.querySelectorAll('[data-open]').forEach(r=>{ r.style.cursor='pointer';
+    r.onclick = e => { if (e.target.closest('button')) return; txDetail(r.dataset.open); }; });
 
   const q = el.querySelector('#fq');
   if (q) { q.oninput = e => { F.q = e.target.value; const p=e.target.selectionStart; render();
@@ -1141,6 +1348,9 @@ function wire(el) {
 
   const at = el.querySelector('#addTop'); if (at) at.onclick = ()=>txModal('out');
   const ai = el.querySelector('#addInc'); if (ai) ai.onclick = ()=>txModal('in');
+  el.querySelectorAll('[data-rmper]').forEach(b=>b.onclick=()=>removeEntity('person', b.dataset.rmper));
+  el.querySelectorAll('[data-rmcard]').forEach(b=>b.onclick=()=>removeEntity('card', b.dataset.rmcard));
+  el.querySelectorAll('[data-rmcat]').forEach(b=>b.onclick=()=>removeEntity('cat', b.dataset.rmcat));
   const ac = el.querySelector('#addCard'); if (ac) ac.onclick = ()=>addSimple('card');
   const ap = el.querySelector('#addPerson'); if (ap) ap.onclick = ()=>addSimple('person');
   const ag = el.querySelector('#addCat'); if (ag) ag.onclick = ()=>addSimple('cat');
