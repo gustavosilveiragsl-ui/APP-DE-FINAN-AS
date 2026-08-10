@@ -102,6 +102,10 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 .big{font-size:42px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-.035em;margin-top:6px;line-height:1}
 .big.neg{color:var(--coral)}
 .big.pos{color:var(--teal)}
+.hero-eq{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:#C3B9DE}
+.hero-eq b{color:#8A80A8;font-weight:700}
+.hero-eq em{font-style:normal;color:var(--dim);font-size:11.5px;padding-left:8px;border-left:1px solid var(--line);margin-left:2px}
+@media(max-width:880px){.hero-eq{font-size:11px;gap:6px}.hero-eq em{border:none;padding-left:0;margin-left:0;width:100%}}
 .hero-split{display:flex;gap:26px;margin-top:18px;flex-wrap:wrap}
 .hero-split .l{font-size:10.5px;color:#A79CC9;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
 .hero-split .v{font-size:17px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-top:3px}
@@ -122,8 +126,26 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 .gauge-info .n{font-family:'JetBrains Mono',monospace;font-weight:600}
 
 /* ============ CREDIT CARD TILES (signature) ============ */
-.cardstack{display:flex;gap:13px;overflow-x:auto;padding:3px 0 10px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
-.cardstack::-webkit-scrollbar{height:0}
+.stackwrap{position:relative}
+.cardstack{display:flex;gap:13px;overflow-x:auto;padding:3px 2px 12px;scroll-snap-type:x proximity;
+  -webkit-overflow-scrolling:touch;scroll-behavior:smooth;cursor:grab}
+.cardstack.dragging{cursor:grabbing;scroll-behavior:auto;scroll-snap-type:none}
+.cardstack.dragging .ctile{pointer-events:none}
+.cardstack::-webkit-scrollbar{height:6px}
+.cardstack::-webkit-scrollbar-thumb{background:var(--panel3);border-radius:6px}
+.cardstack::-webkit-scrollbar-track{background:transparent}
+.stackbtn{position:absolute;top:calc(50% - 24px);width:36px;height:36px;border-radius:50%;display:grid;place-items:center;
+  background:rgba(41,34,63,.94);border:1px solid var(--line);color:var(--text);box-shadow:0 6px 16px rgba(0,0,0,.45);
+  z-index:5;transition:opacity .18s,transform .12s}
+.stackbtn:hover{background:var(--panel3)}
+.stackbtn:active{transform:scale(.9)}
+.stackbtn svg{width:17px;height:17px}
+.stackbtn.l{left:-10px}.stackbtn.r{right:-10px}
+.stackbtn[hidden]{display:none}
+.stackdots{display:flex;gap:5px;justify-content:center;margin-top:2px}
+.stackdots i{width:5px;height:5px;border-radius:50%;background:var(--panel3);transition:.2s}
+.stackdots i.on{background:var(--violet);width:16px;border-radius:3px}
+@media(max-width:880px){.stackbtn{display:none}.cardstack::-webkit-scrollbar{height:0}}
 .ctile{flex:0 0 auto;width:236px;height:132px;border-radius:15px;padding:14px;position:relative;overflow:hidden;
   scroll-snap-align:start;text-align:left;transition:transform .18s,box-shadow .18s;border:1px solid rgba(255,255,255,.14);
   display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 8px 20px rgba(0,0,0,.34)}
@@ -143,6 +165,18 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 .brand-badge{width:34px;height:22px;border-radius:5px;background:rgba(255,255,255,.92);display:grid;place-items:center;
   font-size:8.5px;font-weight:800;letter-spacing:.03em;color:#1a1a1a;font-family:'Inter',sans-serif}
 .ctile.all{background:linear-gradient(140deg,#3B3159,#241E3C)}
+.ctmove{position:absolute;inset:0;display:flex;justify-content:space-between;align-items:center;
+  padding:0 6px;opacity:0;transition:opacity .16s;z-index:3;pointer-events:none}
+.ctile:hover .ctmove,.ctile:focus-within .ctmove{opacity:1}
+.ctmove>span{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;pointer-events:auto;
+  background:rgba(0,0,0,.42);color:#fff;backdrop-filter:blur(3px);border:1px solid rgba(255,255,255,.28);cursor:pointer}
+.ctmove>span:hover{background:rgba(0,0,0,.62)}
+.ctmove>span:active{transform:scale(.88)}
+.ctmove>span[hidden]{visibility:hidden;display:grid}
+.ctmove svg{width:15px;height:15px}
+@media(max-width:880px){.ctmove{opacity:1;padding:0 4px}
+  .ctmove>span{width:26px;height:26px;background:rgba(0,0,0,.34)}
+  .ctmove svg{width:13px;height:13px}}
 
 /* ============ BARS / LISTS ============ */
 .bar-track{height:8px;border-radius:8px;background:var(--panel2);overflow:hidden}
