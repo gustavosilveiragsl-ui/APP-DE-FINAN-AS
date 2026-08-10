@@ -189,6 +189,14 @@ main{flex:1;min-width:0;padding:28px 32px 60px}
 .btn-wa:hover{filter:brightness(1.07)}
 .ibtn{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:var(--muted);border:1px solid var(--line)}
 .ibtn:hover{color:var(--text);background:var(--panel2)}
+.paybtn{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;flex-shrink:0;
+  border:1px solid rgba(255,176,32,.45);background:rgba(255,176,32,.12);color:var(--amber);transition:.15s}
+.paybtn:hover{background:rgba(255,176,32,.22)}
+.paybtn:active{transform:scale(.9)}
+.paybtn svg{width:17px;height:17px}
+.paybtn.done{border-color:rgba(46,211,183,.5);background:rgba(46,211,183,.16);color:var(--teal)}
+.paybtn.done:hover{background:rgba(46,211,183,.26)}
+@media(max-width:880px){.paybtn{width:40px;height:40px;border-radius:13px}.paybtn svg{width:20px;height:20px}}
 .ibtn svg{width:15px;height:15px}
 
 /* ============ CHIPS ============ */
