@@ -401,9 +401,10 @@ function cardTile(c) {
   </button>`;
 }
 
-function txRow(t) {
+function txRow(t, act) {
   const c = cat(t.cat), p = person(t.person), cd = card(t.card);
   const isIn = t.kind==='in';
+  const pend = t.status==='PENDENTE';
   return `<div class="lrow" data-tx="${t.id}">
     <div class="l">
       <span class="ico" style="background:${isIn?'#2ED3B722':c.color+'22'};color:${isIn?'#2ED3B7':c.color}">${svg(isIn?'up':c.icon)}</span>
@@ -413,11 +414,16 @@ function txRow(t) {
           <span class="dot" style="background:${cd.c1}"></span>${esc(cd.name)}
           ${!isIn?`· ${esc(p.name)}`:''} · ${dLabel(t.date)}
           ${t.of?`<span class="tag parc">${t.n}/${t.of}</span>`:''}
-          ${t.status==='PENDENTE'?`<span class="tag pend">pendente</span>`:''}
+          <span class="tag ${pend?'pend':'pago'}">${pend?'pendente':'pago'}</span>
         </div>
       </div>
     </div>
-    <div class="amt" style="color:${isIn?'var(--teal)':'var(--text)'}">${isIn?'+':'−'} ${BRL(t.amount)}</div>
+    <div style="display:flex;align-items:center;gap:9px;flex-shrink:0">
+      <div class="amt" style="color:${isIn?'var(--teal)':'var(--text)'}">${isIn?'+':'−'} ${BRL(t.amount)}</div>
+      ${act?`<button class="paybtn ${pend?'':'done'}" data-toggle="${t.id}"
+        title="${pend?'Marcar como pago':'Voltar para pendente'}" aria-label="${pend?'Marcar como pago':'Voltar para pendente'}">${svg('check',2.6)}</button>
+      <button class="ibtn" data-del="${t.id}" aria-label="Excluir">${svg('trash')}</button>`:''}
+    </div>
   </div>`;
 }
 
@@ -509,7 +515,7 @@ function vExtrato() {
       <thead><tr><th>Descrição</th><th>Categoria</th><th>Cartão</th><th>Pessoa</th><th>Data</th><th>Status</th><th style="text-align:right">Valor</th><th></th></tr></thead>
       <tbody>${list.length ? list.map(txTable).join('') : `<tr><td colspan="8"><div class="empty"><span class="e">🔍</span>Nada encontrado com esses filtros.</div></td></tr>`}</tbody>
     </table>
-    <div class="mcards">${list.length ? list.map(txRow).join('') : `<div class="empty"><span class="e">🔍</span>Nada encontrado com esses filtros.</div>`}</div>
+    <div class="mcards">${list.length ? list.map(t=>txRow(t,true)).join('') : `<div class="empty"><span class="e">🔍</span>Nada encontrado com esses filtros.</div>`}</div>
   </div>`;
 }
 function txTable(t) {
@@ -754,7 +760,7 @@ function vReceitas() {
   <div class="card sec">
     <div class="row-between" style="margin-bottom:8px"><h3>Entradas</h3>
       <button class="btn btn-p btn-sm" id="addInc">${svg('plus')}Nova receita</button></div>
-    ${list.length ? list.map(txRow).join('') : `<div class="empty"><span class="e">💰</span>Nenhuma receita lançada em ${mkLabel(MK)}.</div>`}
+    ${list.length ? list.map(t=>txRow(t,true)).join('') : `<div class="empty"><span class="e">💰</span>Nenhuma receita lançada em ${mkLabel(MK)}.</div>`}
   </div>`;
 }
 
@@ -852,7 +858,17 @@ function txModal(kind) {
         <span class="cdot" style="background:${p.color}"></span>${esc(p.name)}</button>`).join('')}</div></div>
 
     <div class="fld"><label>Parcelas</label>
-      <div class="chips" id="parcChips">${[1,2,3,4,5,6,8,10,12,18,24].map(n=>`<button type="button" class="chip ${sel.parc===n?'on':''}" data-pc="${n}">${n}x</button>`).join('')}</div></div>
+      <div class="chips" id="parcChips">${[1,2,3,4,5,6,10,12].map(n=>`<button type="button" class="chip ${sel.parc===n?'on':''}" data-pc="${n}">${n}x</button>`).join('')}
+        <span class="chip" style="padding:4px 6px 4px 12px;gap:6px;${![1,2,3,4,5,6,10,12].includes(sel.parc)?'background:rgba(139,92,246,.2);border-color:var(--violet);color:#D6CAFF':''}">
+          outro
+          <input type="number" min="1" max="120" id="parcFree" placeholder="13"
+            value="${![1,2,3,4,5,6,10,12].includes(sel.parc)?sel.parc:''}"
+            style="width:56px;background:var(--ink);border:1px solid var(--line);color:var(--text);
+            padding:5px 7px;border-radius:8px;font-size:13px;font-weight:700;text-align:center;outline:none;
+            font-family:'JetBrains Mono',monospace">
+          <span style="font-size:12px;opacity:.7">x</span>
+        </span>
+      </div></div>
 
     <div id="parcMode" style="display:${sel.parc>1?'block':'none'}">
       <div class="seg" style="margin-bottom:14px">
@@ -868,7 +884,12 @@ function txModal(kind) {
 
     <div class="frow">
       <div class="fld"><label>Data</label><input type="date" id="tDate" value="${todayISO()}"></div>
-      ${K==='out'?`<div class="fld"><label>Status</label><select id="tSt"><option value="PAGO">Pago</option><option value="PENDENTE">Pendente</option></select></div>`:''}
+      ${K==='out'?`<div class="fld"><label>Status</label>
+        <div style="display:flex;align-items:center;gap:9px;background:var(--ink);border:1px solid var(--line);
+          padding:12px 13px;border-radius:11px;font-size:14px;color:var(--amber);font-weight:600">
+          <span class="tag pend">pendente</span>
+          <span style="color:var(--dim);font-size:12px;font-weight:500">marque como pago depois, no extrato</span>
+        </div></div>`:''}
     </div>
 
     <div class="macts">
@@ -890,7 +911,17 @@ function txModal(kind) {
       M.querySelectorAll('[data-p]').forEach(x=>x.classList.toggle('on', x.dataset.p===sel.person)); });
     M.querySelectorAll('[data-pc]').forEach(b=>b.onclick=()=>{ sel.parc=+b.dataset.pc;
       M.querySelectorAll('[data-pc]').forEach(x=>x.classList.toggle('on', +x.dataset.pc===sel.parc));
+      const pfx = document.getElementById('parcFree'); if (pfx) pfx.value='';
       const pm=document.getElementById('parcMode'); if(pm) pm.style.display = sel.parc>1?'block':'none'; prev(); });
+    const pf = document.getElementById('parcFree');
+    if (pf) pf.oninput = () => {
+      const n = Math.max(1, Math.min(120, parseInt(pf.value,10)||0));
+      if (!pf.value) return;
+      sel.parc = n;
+      M.querySelectorAll('[data-pc]').forEach(x=>x.classList.remove('on'));
+      const pm = document.getElementById('parcMode'); if (pm) pm.style.display = sel.parc>1?'block':'none';
+      prev();
+    };
     M.querySelectorAll('[data-pm]').forEach(b=>b.onclick=()=>{ sel.mode=b.dataset.pm;
       M.querySelectorAll('[data-pm]').forEach(x=>x.classList.toggle('on', x.dataset.pm===sel.mode)); prev(); });
     M.querySelectorAll('[data-fx]').forEach(b=>b.onclick=()=>{
@@ -920,14 +951,14 @@ function txModal(kind) {
       for (let i=0;i<rep;i++) {
         const k = mkAdd(mk(date), i);
         DB.tx.push({ id:uid(), kind:'in', date:k+'-'+String(Math.min(d,28)).padStart(2,'0'),
-          desc:desc||'Receita', amount:v, card:sel.card, person:'GUSTAVO', cat:'RECEITA', status:'PAGO', fixed:isFix });
+          desc:desc||'Receita', amount:v, card:sel.card, person:'GUSTAVO', cat:'RECEITA', status:'PENDENTE', fixed:isFix });
       }
       save(); closeModal(); render();
       toast(rep>1 ? `Receita fixa lançada por ${rep} meses` : 'Receita lançada');
       return;
     }
 
-    const status = document.getElementById('tSt').value;
+    const status = 'PENDENTE';   // todo lançamento nasce pendente
     const n = sel.parc;
     const each = n>1 ? (sel.mode==='total' ? +(v/n).toFixed(2) : v) : v;
     const grp = n>1 ? uid() : null;
@@ -937,7 +968,7 @@ function txModal(kind) {
       DB.tx.push({ id:uid(), kind:'out', date:k+'-'+String(Math.min(d,28)).padStart(2,'0'),
         desc: n>1 ? `${desc||cat(sel.cat).name} (${i+1}/${n})` : (desc||cat(sel.cat).name),
         amount:each, card:sel.card, person:sel.person, cat:sel.cat,
-        status: i===0 ? status : 'PENDENTE', tipo:'FISICA', n:n>1?i+1:null, of:n>1?n:null, grp });
+        status: status, tipo:'FISICA', n:n>1?i+1:null, of:n>1?n:null, grp });
     }
     save(); closeModal(); render();
     toast(n>1 ? `${n} parcelas de ${BRL(each)} lançadas` : 'Lançamento salvo');
@@ -1035,8 +1066,13 @@ function personDetail(pid) {
   const p = person(pid);
   const items = outOf(MK).filter(t=>t.person===pid).sort((a,b)=>b.amount-a.amount);
   openModal(`<div class="mhead"><h2>${esc(p.name)} · ${mkLabel(MK)}</h2><button class="ibtn" data-close>${svg('x')}</button></div>
-    <div style="max-height:56vh;overflow-y:auto">${items.map(txRow).join('')||'<div class="empty">Nada aqui.</div>'}</div>
+    <div style="max-height:56vh;overflow-y:auto">${items.map(t=>txRow(t,true)).join('')||'<div class="empty">Nada aqui.</div>'}</div>
     <div class="macts"><button class="btn btn-p" data-close>Fechar</button></div>`);
+  document.querySelectorAll('#mbody [data-toggle]').forEach(b=>b.onclick=()=>{
+    const t = DB.tx.find(x=>x.id===b.dataset.toggle);
+    if (t) { t.status = t.status==='PAGO'?'PENDENTE':'PAGO'; save(); render(); personDetail(pid); } });
+  document.querySelectorAll('#mbody [data-del]').forEach(b=>b.onclick=()=>{
+    DB.tx = DB.tx.filter(t=>t.id!==b.dataset.del); save(); render(); personDetail(pid); toast('Lançamento excluído'); });
 }
 
 /* ------------------------------------------------------------ BACKUP */
