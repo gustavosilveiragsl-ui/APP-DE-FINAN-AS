@@ -124,8 +124,7 @@ function importSeed() {
 /* ------------------------------------------------------------------- UTILS */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const BRL = v => (v<0?'-':'') + 'R$ ' + Math.abs(+v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-const BRLk = v => { const n=Math.abs(+v||0); const s=v<0?'-':'';
-  return n>=1000 ? s+'R$ '+(n/1000).toFixed(n>=10000?0:1).replace('.',',')+'k' : s+'R$ '+n.toFixed(0); };
+const BRLk = v => BRL(v);   // valores sempre por extenso, sem abreviar
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const mk = d => (d||'').slice(0,7);
 const nowMK = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); };
@@ -207,7 +206,7 @@ function donut(entries, size, colorOf, centerTop, centerBot) {
       <circle cx="${size/2}" cy="${size/2}" r="${R}" fill="none" stroke="#29223F" stroke-width="15"/>${arcs}
     </svg>
     <div style="position:absolute;inset:0;display:grid;place-content:center;text-align:center">
-      <div class="num" style="font-size:${size>150?18:16}px;font-weight:800">${centerTop}</div>
+      <div class="num" style="font-size:${size>=150?13:12}px;font-weight:800;letter-spacing:-.04em;white-space:nowrap">${centerTop}</div>
       <div style="font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-top:2px">${centerBot}</div>
     </div></div>`;
 }
@@ -320,7 +319,7 @@ function vInicio() {
             <circle cx="66" cy="66" r="52" fill="none" stroke="${leftColor}" stroke-width="13" stroke-linecap="round"
               stroke-dasharray="${ring}" stroke-dashoffset="${ring - ring*pct/100}"/>
           </svg>
-          <div class="mid"><div class="v" style="color:${leftColor}">${BRLk(av.left)}</div><div class="l">restam</div></div>
+          <div class="mid"><div class="v" style="color:${leftColor}">${BRL(av.left)}</div><div class="l">restam</div></div>
         </div>
         <ul class="gauge-info">
           <li><span class="k">${av.mode==='meta'?'Meta do mês':'Receita do mês'}</span><span class="n">${BRL(av.limit)}</span></li>
@@ -342,7 +341,7 @@ function vInicio() {
     <div class="card">
       <div class="row-between" style="margin-bottom:14px"><h3>Por categoria</h3></div>
       <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
-        ${donut(byCat.slice(0,7), 150, k=>cat(k).color, BRLk(s.desp), 'no mês')}
+        ${donut(byCat.slice(0,7), 150, k=>cat(k).color, BRL(s.desp), 'no mês')}
         <div style="flex:1;min-width:170px">
           ${byCat.length ? byCat.slice(0,6).map(([k,v])=>{const c=cat(k);const p=Math.round(v/s.desp*100);
             return `<div class="brow"><div class="t"><span class="nm">
@@ -393,7 +392,7 @@ function cardTile(c) {
     <div class="ct-top">
       <div><div class="ct-name">${esc(c.name)}</div>
         <div class="ct-lab" style="margin-top:5px">${isCard?'Fatura':'Movimentado'}</div>
-        <div class="ct-val">${BRLk(f.total)}</div></div>
+        <div class="ct-val">${BRL(f.total)}</div></div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
         <div class="brand-badge">${esc((c.brand||'').toUpperCase())}</div>
         <div class="ct-chip"></div></div>
