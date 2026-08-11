@@ -5,6 +5,23 @@
 (function () {
 "use strict";
 
+/* Se o sync.js não carregar, o app segue funcionando só neste aparelho. */
+if (!window.FATURA_SYNC) {
+  window.FATURA_SYNC = {
+    indisponivel: true, device: 'Este aparelho',
+    logado: false, email: null, status: 'off', meta: { version:0, dirty:false },
+    onStatus(){}, marcarSujo(){}, setVersion(){}, schedulePush(){}, startPolling(){},
+    pull: () => Promise.resolve(null),
+    push: () => Promise.resolve({ ok:false }),
+    checkRemote: () => Promise.resolve(null),
+    signUp: () => Promise.reject(new Error('Sincronização indisponível')),
+    signIn: () => Promise.reject(new Error('Sincronização indisponível')),
+    signOut: () => Promise.resolve(),
+    resetSenha: () => Promise.reject(new Error('Sincronização indisponível')),
+    traduz: e => (e && e.message) || 'Erro',
+  };
+}
+
 /* ---------------------------------------------------------------- ÍCONES */
 const ICON = {
   home:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5h4v5"/>',
@@ -90,11 +107,97 @@ function load() {
 }
 let st = null;
 function save() {
+  DB.settings.touched = Date.now();
   clearTimeout(st);
   st = setTimeout(() => {
     try { localStorage.setItem(KEY, JSON.stringify(DB)); }
     catch(e){ toast('Sem espaço para salvar. Exporte um backup em Ajustes.'); }
+    if (window.FATURA_SYNC && FATURA_SYNC.logado) {
+      FATURA_SYNC.marcarSujo();
+      FATURA_SYNC.schedulePush(()=>DB, 1500);
+    }
   }, 200);
+}
+
+/* ============================ SINCRONIZAÇÃO ============================ */
+function aplicarRemoto(row, silencioso) {
+  if (!row || !row.data || !Array.isArray(row.data.tx)) return;
+  DB = Object.assign(blank(), row.data);
+  FATURA_SYNC.setVersion(row.version);
+  try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch(e){}
+  render(); drawNav(); pintarSync();
+  if (!silencioso) toast(`Atualizado de ${row.device || 'outro aparelho'}`);
+}
+
+async function sincronizarAgora(inicial) {
+  if (!window.FATURA_SYNC || !FATURA_SYNC.logado) return;
+  try {
+    const row = await FATURA_SYNC.pull();
+    const localTem = DB.tx.length > 0;
+
+    if (!row) {                                  // nuvem vazia: sobe o que tem aqui
+      await FATURA_SYNC.push(DB, true);
+      pintarSync(); return;
+    }
+    if (row.version > FATURA_SYNC.meta.version) {
+      const remotoTem = row.data && Array.isArray(row.data.tx) ? row.data.tx.length : 0;
+      if (inicial && localTem && remotoTem && FATURA_SYNC.meta.version === 0) {
+        escolherVersao(row); return;             // primeiro login com dados dos dois lados
+      }
+      aplicarRemoto(row, inicial);
+    } else if (FATURA_SYNC.meta.dirty) {
+      await FATURA_SYNC.push(DB);
+    }
+    pintarSync();
+  } catch(e) { pintarSync(); }
+}
+
+/* Primeiro login com dados no aparelho E na nuvem: quem manda? */
+function escolherVersao(row) {
+  const rt = (row.data && row.data.tx) ? row.data.tx.length : 0;
+  openModal(`<div class="mhead"><h2>Dois conjuntos de dados</h2></div>
+    <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 16px">
+      Este aparelho tem <strong style="color:var(--text)">${DB.tx.length} lançamentos</strong> e a
+      sua conta na nuvem tem <strong style="color:var(--text)">${rt}</strong>
+      (gravados por ${esc(row.device||'outro aparelho')}). Qual você quer manter?</p>
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <button class="btn" id="vNuvem" style="justify-content:flex-start;padding:14px 16px">
+        ${svg('down')}Usar os ${rt} da nuvem <span style="color:var(--dim);margin-left:4px">(descarta os daqui)</span></button>
+      <button class="btn" id="vLocal" style="justify-content:flex-start;padding:14px 16px">
+        ${svg('up')}Enviar os ${DB.tx.length} deste aparelho <span style="color:var(--dim);margin-left:4px">(substitui a nuvem)</span></button>
+      <button class="btn" id="vJuntar" style="justify-content:flex-start;padding:14px 16px;
+        background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.4)">
+        ${svg('plus')}Juntar os dois <span style="color:var(--dim);margin-left:4px">(sem duplicar)</span></button>
+    </div>
+    <p style="font-size:11.5px;color:var(--dim);margin:14px 0 0;line-height:1.5">
+      Na dúvida, escolha juntar. Exporte um backup em Ajustes antes, se quiser garantia.</p>`);
+  document.getElementById('vNuvem').onclick = ()=>{ aplicarRemoto(row,true); closeModal(); toast('Dados da nuvem carregados'); };
+  document.getElementById('vLocal').onclick = async ()=>{ closeModal();
+    await FATURA_SYNC.push(DB, true); pintarSync(); toast('Enviado para a nuvem'); };
+  document.getElementById('vJuntar').onclick = async ()=>{ closeModal();
+    const antes = DB.tx.length;
+    DB = juntar(DB, row.data);
+    try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch(e){}
+    FATURA_SYNC.setVersion(row.version);
+    await FATURA_SYNC.push(DB, true);
+    render(); drawNav(); pintarSync();
+    toast(`${DB.tx.length - antes} lançamentos vieram da nuvem`); };
+}
+
+/* Junta sem duplicar: id igual é o mesmo lançamento */
+function juntar(a, b) {
+  const out = Object.assign(blank(), a);
+  const ids = new Set(out.tx.map(t=>t.id));
+  const assinatura = new Set(out.tx.map(t=>[t.kind,t.date,t.amount,(t.desc||'').trim(),t.card,t.person].join('|')));
+  (b.tx||[]).forEach(t => {
+    const sig = [t.kind,t.date,t.amount,(t.desc||'').trim(),t.card,t.person].join('|');
+    if (!ids.has(t.id) && !assinatura.has(sig)) { out.tx.push(t); ids.add(t.id); assinatura.add(sig); }
+  });
+  ['cards','people','cats'].forEach(k => {
+    const vistos = new Set(out[k].map(x=>x.id));
+    (b[k]||[]).forEach(x => { if (!vistos.has(x.id)) { out[k].push(x); vistos.add(x.id); } });
+  });
+  return out;
 }
 
 /* Importa a planilha original uma única vez */
@@ -275,9 +378,13 @@ function drawNav() {
     + `<button class="${['previsao','receitas','config'].includes(TAB)?'active':''}" data-more="1">${svg('dots',2.1)}Mais</button>`;
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   const mb = document.querySelector('[data-more]'); if (mb) mb.onclick = moreSheet;
+  const S = window.FATURA_SYNC;
+  const L = SYNC_LABEL[S && S.logado ? S.status : 'off'] || SYNC_LABEL.off;
   document.getElementById('sideFoot').innerHTML =
-    `<strong style="color:var(--muted)">${DB.tx.length}</strong> lançamentos salvos neste aparelho.<br>
-     Faça backup em Ajustes de vez em quando.`;
+    `<span class="syncchip" data-syncchip><span class="syncdot" style="background:${L.c}"></span>
+      <span style="color:${L.c}">${L.t}</span></span>
+     <div style="margin-top:8px"><strong style="color:var(--muted)">${DB.tx.length}</strong> lançamentos
+     ${S&&S.logado?`· ${esc(S.email||'')}`:'neste aparelho'}</div>`;
 }
 function go(tab) {
   TAB = tab;
@@ -1152,6 +1259,35 @@ function vConfig() {
   </div>
 
   <div class="card sec">
+    <div class="row-between" style="margin-bottom:6px"><h3>Sincronização entre aparelhos</h3>
+      <span class="syncchip" data-syncchip></span></div>
+    ${FATURA_SYNC.logado ? `
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.55">
+        Conectado como <strong style="color:var(--text)">${esc(FATURA_SYNC.email||'')}</strong>.
+        Este aparelho aparece como <strong style="color:var(--text)">${esc(FATURA_SYNC.device)}</strong>.
+        Entre com a mesma conta no outro aparelho e os dois passam a conversar.</p>
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn btn-sm" id="syncNow">${svg('wifi')}Sincronizar agora</button>
+        <button class="btn btn-sm btn-g" id="syncOut">Sair da conta</button>
+      </div>`
+    : FATURA_SYNC.indisponivel ? `
+      <p style="font-size:12.5px;color:var(--amber);margin:0 0 6px;line-height:1.55">
+        O arquivo <strong>sync.js</strong> não foi carregado, então a sincronização está desligada.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin:0;line-height:1.55">
+        Confira se ele foi publicado junto com os outros arquivos. Seus lançamentos continuam
+        salvos normalmente neste aparelho.</p>`
+    : `
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.55">
+        Hoje seus lançamentos ficam só neste aparelho. Crie uma conta para o celular e o
+        computador enxergarem os mesmos dados. Continua funcionando sem internet — sobe sozinho
+        quando a conexão volta.</p>
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn btn-p btn-sm" id="syncUp">${svg('up')}Criar conta</button>
+        <button class="btn btn-sm" id="syncIn">Já tenho conta</button>
+      </div>`}
+  </div>
+
+  <div class="card sec">
     <h3 style="margin-bottom:6px">Backup dos seus dados</h3>
     <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.5">
       Tudo fica salvo apenas neste aparelho. Exporte um arquivo para levar seus lançamentos para o celular ou para o computador — e para não perder nada se limpar o navegador.</p>
@@ -1624,6 +1760,85 @@ function removeEntity(kind, id) {
     drop(); toast(`${obj.name} e ${used.length} lançamentos excluídos`); };
 }
 
+/* ------------------------------------------------------ UI DE SINCRONIA */
+const SYNC_LABEL = {
+  off:     { t:'Não sincronizado', c:'var(--dim)',   i:'wifi'  },
+  ok:      { t:'Sincronizado',     c:'var(--teal)',  i:'check' },
+  syncing: { t:'Sincronizando…',   c:'var(--sky)',   i:'wifi'  },
+  offline: { t:'Offline · salvo aqui', c:'var(--amber)', i:'wifi' },
+  error:   { t:'Erro ao sincronizar', c:'var(--coral)', i:'alert' },
+  conflict:{ t:'Conflito entre aparelhos', c:'var(--amber)', i:'alert' },
+};
+function pintarSync() {
+  const S = window.FATURA_SYNC;
+  document.querySelectorAll('[data-syncchip]').forEach(el => {
+    const k = S && S.logado ? S.status : 'off';
+    const L = SYNC_LABEL[k] || SYNC_LABEL.off;
+    el.innerHTML = `<span class="syncdot" style="background:${L.c}"></span>
+      <span style="color:${L.c}">${L.t}</span>`;
+  });
+  const f = document.getElementById('sideFoot');
+  if (f) drawNav();
+}
+
+function contaModal(modo) {
+  const S = FATURA_SYNC;
+  let M = modo || 'in';
+  const paint = () => {
+    openModal(`<div class="mhead"><h2>${M==='up'?'Criar conta':'Entrar'}</h2>
+      <button class="ibtn" data-close>${svg('x')}</button></div>
+      <p style="font-size:13px;color:var(--muted);line-height:1.55;margin:0 0 16px">
+        ${M==='up'
+          ? 'Uma conta só sua, para os lançamentos aparecerem no celular e no computador.'
+          : 'Entre com a mesma conta nos dois aparelhos para eles conversarem.'}</p>
+      <div class="fld"><label>E-mail</label>
+        <input type="email" id="acEmail" inputmode="email" autocomplete="email" placeholder="voce@email.com"></div>
+      <div class="fld"><label>Senha</label>
+        <input type="password" id="acSenha" autocomplete="${M==='up'?'new-password':'current-password'}" placeholder="mínimo 6 caracteres"></div>
+      <p id="acErro" style="font-size:12.5px;color:var(--coral);margin:-6px 0 12px;display:none"></p>
+      <div class="macts">
+        <button class="btn btn-g" id="acAlt">${M==='up'?'Já tenho conta':'Criar conta'}</button>
+        <button class="btn btn-p" id="acGo">${M==='up'?'Criar':'Entrar'}</button>
+      </div>
+      ${M==='in'?`<button class="muted-link" id="acEsq" style="display:block;margin:14px auto 0">Esqueci a senha</button>`:''}`);
+
+    document.getElementById('acAlt').onclick = ()=>{ M = M==='up'?'in':'up'; paint(); };
+    const erro = m => { const e=document.getElementById('acErro'); e.textContent=m; e.style.display='block'; };
+    const esq = document.getElementById('acEsq');
+    if (esq) esq.onclick = async ()=>{
+      const em = document.getElementById('acEmail').value.trim();
+      if (!em) { erro('Escreva seu e-mail primeiro.'); return; }
+      try { await S.resetSenha(em); toast('Link de recuperação enviado'); }
+      catch(e){ erro(S.traduz(e)); }
+    };
+    document.getElementById('acGo').onclick = async ()=>{
+      const em = document.getElementById('acEmail').value.trim();
+      const sn = document.getElementById('acSenha').value;
+      if (!em || !sn) { erro('Preencha e-mail e senha.'); return; }
+      if (sn.length < 6) { erro('A senha precisa de pelo menos 6 caracteres.'); return; }
+      const btn = document.getElementById('acGo'); btn.textContent='Aguarde…'; btn.disabled=true;
+      try {
+        if (M==='up') {
+          const r = await S.signUp(em, sn);
+          if (r.confirmar) { closeModal();
+            toast('Confirme o e-mail que enviamos e depois entre'); return; }
+        } else {
+          await S.signIn(em, sn);
+        }
+        closeModal();
+        toast('Conectado como ' + S.email);
+        await sincronizarAgora(true);
+        S.startPolling(row => aplicarRemoto(row), 20000);
+        render(); drawNav();
+      } catch(e) {
+        btn.textContent = M==='up'?'Criar':'Entrar'; btn.disabled=false;
+        erro(S.traduz(e));
+      }
+    };
+  };
+  paint();
+}
+
 /* ------------------------------------------------------------ BACKUP */
 function download(name, content, type) {
   const b = new Blob([content], {type:type||'application/json'});
@@ -1748,6 +1963,21 @@ function wire(el) {
   const ag = el.querySelector('#addCat'); if (ag) ag.onclick = ()=>addSimple('cat');
   const ms = el.querySelector('#metaSave');
   if (ms) ms.onclick = ()=>{ DB.settings.meta = +document.getElementById('metaIn').value||0; save(); render(); toast('Meta salva'); };
+  const su = el.querySelector('#syncUp'); if (su) su.onclick = ()=>contaModal('up');
+  const si = el.querySelector('#syncIn'); if (si) si.onclick = ()=>contaModal('in');
+  const sn = el.querySelector('#syncNow');
+  if (sn) sn.onclick = async ()=>{ toast('Sincronizando…'); await sincronizarAgora(false); toast('Tudo em dia'); };
+  const so = el.querySelector('#syncOut');
+  if (so) so.onclick = ()=>{
+    openModal(`<div class="mhead"><h2>Sair da conta?</h2><button class="ibtn" data-close>${svg('x')}</button></div>
+      <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0">
+        Seus lançamentos continuam salvos neste aparelho e na nuvem. Você pode entrar de novo quando quiser.</p>
+      <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+        <button class="btn btn-p" id="outYes">Sair</button></div>`);
+    document.getElementById('outYes').onclick = async ()=>{
+      await FATURA_SYNC.signOut(); closeModal(); render(); drawNav(); toast('Você saiu da conta'); };
+  };
+  pintarSync();
   const ej = el.querySelector('#expJson'); if (ej) ej.onclick = exportJson;
   const ec = el.querySelector('#expCsv'); if (ec) ec.onclick = exportCsv;
   const ij = el.querySelector('#impJson');
@@ -1776,5 +2006,20 @@ load();
 drawNav();
 document.getElementById('v-inicio').classList.add('on');
 render();
+
+/* liga a sincronização */
+if (window.FATURA_SYNC) {
+  FATURA_SYNC.onStatus(()=>pintarSync());
+  if (FATURA_SYNC.logado) {
+    sincronizarAgora(true);
+    FATURA_SYNC.startPolling(row => aplicarRemoto(row), 20000);
+  }
+  window.addEventListener('online',  ()=>{ if (FATURA_SYNC.logado) sincronizarAgora(false); });
+  window.addEventListener('offline', ()=>pintarSync());
+  document.addEventListener('visibilitychange', ()=>{
+    if (!document.hidden && FATURA_SYNC.logado) sincronizarAgora(false); });
+  window.addEventListener('beforeunload', ()=>{
+    if (FATURA_SYNC.logado && FATURA_SYNC.meta.dirty) FATURA_SYNC.push(DB); });
+}
 
 })();
