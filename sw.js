@@ -1,5 +1,5 @@
 /* Troque VERSION a cada atualização para forçar o refresh nos aparelhos. */
-const VERSION = 'v7-fix-merge-2026-08-11';
+const VERSION = 'v8-iphone-safe-area-2026-08-11';
 const CACHE = 'fatura-' + VERSION;
 const ASSETS = ['./','./index.html','./app.js','./seed.js','./sync.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 
