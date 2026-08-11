@@ -10,7 +10,7 @@ if (!window.FATURA_SYNC) {
   window.FATURA_SYNC = {
     indisponivel: true, device: 'Este aparelho',
     logado: false, email: null, status: 'off', meta: { version:0, dirty:false },
-    onStatus(){}, marcarSujo(){}, setVersion(){}, schedulePush(){}, startPolling(){},
+    onStatus(){}, marcarSujo(){}, marcarEmDia(){}, setVersion(){}, schedulePush(){}, startPolling(){},
     pull: () => Promise.resolve(null),
     push: () => Promise.resolve({ ok:false }),
     checkRemote: () => Promise.resolve(null),
@@ -149,6 +149,8 @@ async function sincronizarAgora(inicial) {
       aplicarRemoto(row, inicial);
     } else if (FATURA_SYNC.meta.dirty) {
       await FATURA_SYNC.push(DB);
+    } else {
+      FATURA_SYNC.marcarEmDia();
     }
     pintarSync();
   } catch(e) { pintarSync(); }
@@ -1776,7 +1778,7 @@ function removeEntity(kind, id) {
 const SYNC_LABEL = {
   off:     { t:'Não sincronizado', c:'var(--dim)',   i:'wifi'  },
   ok:      { t:'Sincronizado',     c:'var(--teal)',  i:'check' },
-  syncing: { t:'Sincronizando…',   c:'var(--sky)',   i:'wifi'  },
+  syncing: { t:'Verificando…',     c:'var(--sky)',   i:'wifi'  },
   offline: { t:'Offline · salvo aqui', c:'var(--amber)', i:'wifi' },
   error:   { t:'Erro ao sincronizar', c:'var(--coral)', i:'alert' },
   conflict:{ t:'Conflito entre aparelhos', c:'var(--amber)', i:'alert' },

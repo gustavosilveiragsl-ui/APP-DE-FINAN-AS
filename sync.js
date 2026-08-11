@@ -32,6 +32,7 @@ const device = (() => {
 })();
 
 try { session = JSON.parse(localStorage.getItem(SESS_KEY) || 'null'); } catch(e){}
+if (session) status = 'syncing';   // logado: já começa verificando, não "desligado"
 try { meta = Object.assign(meta, JSON.parse(localStorage.getItem(META_KEY) || '{}')); } catch(e){}
 
 const saveSess = () => session ? localStorage.setItem(SESS_KEY, JSON.stringify(session))
@@ -124,7 +125,8 @@ async function pull() {
   const rows = await api('/rest/v1/fatura_state?select=data,version,updated_at,device', {
     headers: { 'Accept':'application/json' }
   });
-  if (!rows || !rows.length) return null;
+  if (!rows || !rows.length) { if (!meta.dirty) setStatus('ok', { quando: Date.now() }); return null; }
+  if (!meta.dirty) setStatus('ok', { quando: Date.now() });
   return rows[0];
 }
 
@@ -185,7 +187,7 @@ async function checkRemote() {
     const v = await api('/rest/v1/rpc/fatura_version', { method:'POST', body:{} });
     const remota = typeof v === 'number' ? v : (Array.isArray(v) ? v[0] : 0);
     if (remota > meta.version) return remota;
-    if (status === 'offline' || status === 'error') setStatus('ok');
+    if (!meta.dirty) setStatus('ok', { quando: Date.now() });
     return null;
   } catch(e) { return null; }
 }
@@ -226,6 +228,7 @@ return {
   signUp, signIn, signOut, resetSenha,
   pull, push, checkRemote, schedulePush, startPolling,
   marcarSujo() { meta.dirty = true; saveMeta(); },
+  marcarEmDia() { if (session) setStatus('ok', { quando: Date.now() }); },
   setVersion(v){ meta.version = v; saveMeta(); },
   traduz,
 };
