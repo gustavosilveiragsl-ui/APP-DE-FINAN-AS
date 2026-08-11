@@ -102,7 +102,9 @@ function load() {
     if (raw) { DB = Object.assign(blank(), JSON.parse(raw)); return; }
   } catch(e){}
   DB = blank();
-  if (window.SEED_DATA) importSeed();
+  const S = window.SEED_DATA;
+  const temSeed = S && ((S.despesas && S.despesas.length) || (S.receitas && S.receitas.length));
+  if (temSeed) importSeed();
   save();
 }
 let st = null;
@@ -155,22 +157,30 @@ async function sincronizarAgora(inicial) {
 /* Primeiro login com dados no aparelho E na nuvem: quem manda? */
 function escolherVersao(row) {
   const rt = (row.data && row.data.tx) ? row.data.tx.length : 0;
+  const veioDeImport = !!(DB.settings && DB.settings.seeded);
   openModal(`<div class="mhead"><h2>Dois conjuntos de dados</h2></div>
-    <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 16px">
+    <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 ${veioDeImport?'12':'16'}px">
       Este aparelho tem <strong style="color:var(--text)">${DB.tx.length} lançamentos</strong> e a
       sua conta na nuvem tem <strong style="color:var(--text)">${rt}</strong>
       (gravados por ${esc(row.device||'outro aparelho')}). Qual você quer manter?</p>
+    ${veioDeImport?`<div style="background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.35);
+      border-radius:12px;padding:12px 14px;margin-bottom:16px">
+      <p style="font-size:12.5px;color:var(--amber);margin:0;line-height:1.55">
+        <strong>Atenção:</strong> os lançamentos deste aparelho vieram de uma importação automática,
+        não foram digitados por você. Quase sempre o certo aqui é <strong>usar os da nuvem</strong>.</p></div>`:''}
     <div style="display:flex;flex-direction:column;gap:9px">
       <button class="btn" id="vNuvem" style="justify-content:flex-start;padding:14px 16px">
         ${svg('down')}Usar os ${rt} da nuvem <span style="color:var(--dim);margin-left:4px">(descarta os daqui)</span></button>
       <button class="btn" id="vLocal" style="justify-content:flex-start;padding:14px 16px">
         ${svg('up')}Enviar os ${DB.tx.length} deste aparelho <span style="color:var(--dim);margin-left:4px">(substitui a nuvem)</span></button>
       <button class="btn" id="vJuntar" style="justify-content:flex-start;padding:14px 16px;
-        background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.4)">
-        ${svg('plus')}Juntar os dois <span style="color:var(--dim);margin-left:4px">(sem duplicar)</span></button>
+        ${veioDeImport?'':'background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.4)'}">
+        ${svg('plus')}Juntar os dois <span style="color:var(--dim);margin-left:4px">${veioDeImport?'(não recomendado aqui)':'(sem duplicar)'}</span></button>
     </div>
     <p style="font-size:11.5px;color:var(--dim);margin:14px 0 0;line-height:1.5">
-      Na dúvida, escolha juntar. Exporte um backup em Ajustes antes, se quiser garantia.</p>`);
+      ${veioDeImport
+        ? 'Juntar aqui traria a importação antiga junto com seus dados reais — por isso ela não é a opção recomendada.'
+        : 'Na dúvida, escolha juntar. Exporte um backup em Ajustes antes, se quiser garantia.'}</p>`);
   document.getElementById('vNuvem').onclick = ()=>{ aplicarRemoto(row,true); closeModal(); toast('Dados da nuvem carregados'); };
   document.getElementById('vLocal').onclick = async ()=>{ closeModal();
     await FATURA_SYNC.push(DB, true); pintarSync(); toast('Enviado para a nuvem'); };
@@ -184,9 +194,11 @@ function escolherVersao(row) {
     toast(`${DB.tx.length - antes} lançamentos vieram da nuvem`); };
 }
 
-/* Junta sem duplicar: id igual é o mesmo lançamento */
+/* Junta sem duplicar: id igual é o mesmo lançamento.
+   Dados que vieram de importação automática (seed) nunca são levados para a nuvem. */
 function juntar(a, b) {
   const out = Object.assign(blank(), a);
+  if (a.settings && a.settings.seeded && !a.settings.confirmouSeed) out.tx = [];
   const ids = new Set(out.tx.map(t=>t.id));
   const assinatura = new Set(out.tx.map(t=>[t.kind,t.date,t.amount,(t.desc||'').trim(),t.card,t.person].join('|')));
   (b.tx||[]).forEach(t => {
