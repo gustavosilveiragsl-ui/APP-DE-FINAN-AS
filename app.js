@@ -275,11 +275,16 @@ const sum     = a => a.reduce((s,t)=>s+(+t.amount||0),0);
 function groupBy(list, key) { const m={}; list.forEach(t=>{ m[t[key]]=(m[t[key]]||0)+(+t.amount||0); }); return m; }
 function sorted(m) { return Object.entries(m).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]); }
 
+/* Gasto que é seu de fato — exclui quem te reembolsa */
+const ehMeuGasto = t => { const p = person(t.person); return p.owner || p.reembolsa === false; };
+const outMeus  = k => outOf(k).filter(ehMeuGasto);
+const outTerc  = k => outOf(k).filter(t => !ehMeuGasto(t));
+
 function monthStats(k) {
   const o = outOf(k), i = inOf(k);
   const desp = sum(o), rec = sum(i);
   const pend = sum(o.filter(t=>t.status==='PENDENTE'));
-  const meus = sum(o.filter(t=>t.person==='GUSTAVO'));
+  const meus = sum(o.filter(ehMeuGasto));
   const outros = desp - meus;
   const ar = contasAReceber(k);
   return { desp, rec, pend, meus, outros, saldo: rec-desp,
@@ -673,52 +678,106 @@ function txRow(t, act) {
 /* --------------------------------------------------------------- DICAS */
 function tips() {
   const out = [];
-  const s = monthStats(MK);
-  const av = availableToSpend(MK);
-  const prev3 = lastMonths(4).slice(0,3);
-  const avg = prev3.length ? prev3.reduce((a,b)=>a+b.desp,0)/prev3.length : 0;
+  const s   = monthStats(MK);
+  const av  = availableToSpend(MK);
+  const ar  = contasAReceber(MK);
 
-  if (av.left < 0)
-    out.push({ i:'alert', c:'#FF5C7A', t:'Você passou do que entrou este mês',
-      p:`Suas despesas de ${mkLabel(MK)} superam as receitas em <strong>${BRL(-av.left)}</strong>. Antes de qualquer corte novo, vale olhar as parcelas: elas continuam caindo mesmo em meses magros.` });
-  else if (av.limit>0 && av.left < av.limit*0.15)
+  /* Tudo abaixo olha SÓ o que é seu de fato — gasto de quem te reembolsa não conta. */
+  const meus     = outMeus(MK);
+  const gastoMeu = sum(meus);
+  const prev3    = [1,2,3].map(i => sum(outMeus(mkAdd(MK,-i))));
+  const comHist  = prev3.filter(v => v > 0);
+  const media    = comHist.length ? comHist.reduce((a,b)=>a+b,0)/comHist.length : 0;
+
+  /* --- Saldo --- */
+  if (av.left < 0) {
+    out.push({ i:'alert', c:'#FF5C7A', t:'Seu mês fecha no vermelho',
+      p:`Mesmo contando os <strong>${BRL(ar.falta)}</strong> que ainda têm a te pagar, faltam
+         <strong>${BRL(-av.left)}</strong>. Seus gastos próprios somam ${BRL(gastoMeu)} —
+         é aí que dá para mexer, o resto volta.` });
+  } else if (ar.falta > 0 && s.saldo < 0 && av.left >= 0) {
+    out.push({ i:'users', c:'#5AA9F0', t:'No papel você está negativo, na real não',
+      p:`Seu caixa hoje é ${BRL(s.saldo)}, mas <strong>${BRL(ar.falta)}</strong> ainda vão entrar de terceiros.
+         Descontando isso, seu mês fecha em <strong>${BRL(av.left)}</strong>. O aperto é de prazo, não de dinheiro —
+         cobrar antes do vencimento resolve.` });
+  } else if (av.limit > 0 && av.left < av.limit * 0.15) {
     out.push({ i:'alert', c:'#FFB020', t:'Reta final do orçamento',
-      p:`Sobram <strong>${BRL(av.left)}</strong> de ${BRL(av.limit)}. Dá pra fechar no azul segurando os gastos por impulso até a virada do mês.` });
+      p:`Sobram <strong>${BRL(av.left)}</strong>. Como ${BRL(s.outros)} do que passou no cartão
+         não é gasto seu, o espaço real para cortar está nos ${BRL(gastoMeu)} que são seus.` });
+  }
 
-  const byCat = sorted(groupBy(outOf(MK),'cat'));
-  if (byCat.length) {
-    const [topId, topV] = byCat[0];
-    const share = Math.round(topV/s.desp*100);
+  /* --- Categoria pesada (só sobre gasto próprio) --- */
+  const catMeus = sorted(groupBy(meus, 'cat'));
+  if (catMeus.length && gastoMeu > 0) {
+    const [id, v] = catMeus[0];
+    const share = Math.round(v / gastoMeu * 100);
     if (share >= 35)
-      out.push({ i:'chart', c:cat(topId).color, t:`${cat(topId).name} come ${share}% do seu mês`,
-        p:`São <strong>${BRL(topV)}</strong> só nessa categoria. Uma redução de 10% aqui devolveria ${BRL(topV*0.1)} ao seu bolso — mais do que cortar três categorias pequenas.` });
+      out.push({ i:'chart', c:cat(id).color, t:`${cat(id).name} é ${share}% do que você gasta`,
+        p:`<strong>${BRL(v)}</strong> dos ${BRL(gastoMeu)} que saem do seu bolso.
+           Cortar 10% aqui devolve ${BRL(v*0.1)} por mês — mais do que mexer em três categorias pequenas.` });
   }
-  if (avg > 0 && s.desp > avg*1.15)
-    out.push({ i:'trend', c:'#FF5C7A', t:'Mês acima da sua média',
-      p:`Você gastou <strong>${BRL(s.desp)}</strong> contra uma média de ${BRL(avg)} nos 3 meses anteriores. Diferença de ${BRL(s.desp-avg)}.` });
-  if (avg > 0 && s.desp < avg*0.9)
-    out.push({ i:'check', c:'#2ED3B7', t:'Mês mais leve que o normal',
-      p:`Ficou ${BRL(avg-s.desp)} abaixo da sua média. Se esse valor for pra uma reserva agora, ele não vira gasto depois.` });
 
-  if (s.pend > 0)
-    out.push({ i:'alert', c:'#FFB020', t:`${BRL(s.pend)} ainda em aberto`,
-      p:`Há lançamentos marcados como pendentes em ${mkLabel(MK)}. Confirme os que já foram pagos para o saldo refletir a realidade.` });
+  /* --- Comparação com a média (só gasto próprio) --- */
+  if (media > 0 && gastoMeu > media * 1.15)
+    out.push({ i:'trend', c:'#FF5C7A', t:'Você gastou acima da sua média',
+      p:`<strong>${BRL(gastoMeu)}</strong> contra ${BRL(media)} de média nos meses anteriores —
+         ${BRL(gastoMeu-media)} a mais. Comparação feita só com gastos seus, sem os de terceiros.` });
+  if (media > 0 && gastoMeu < media * 0.9 && gastoMeu > 0)
+    out.push({ i:'check', c:'#2ED3B7', t:'Mês mais leve que o seu normal',
+      p:`Seus gastos ficaram <strong>${BRL(media-gastoMeu)}</strong> abaixo da média.
+         Se esse valor virar reserva agora, ele não vira gasto depois.` });
 
-  const fut = futureMonths(6);
-  const futTotal = fut.reduce((a,b)=>a+b.total,0);
-  if (futTotal > 0) {
-    const worst = fut.reduce((a,b)=> b.total>a.total?b:a, fut[0]);
+  /* --- Terceiros --- */
+  if (ar.falta > 0) {
+    const maior = ar.rows.filter(r=>r.falta>0.005).sort((a,b)=>b.falta-a.falta)[0];
+    const pesoRenda = s.rec > 0 ? Math.round(ar.falta / s.rec * 100) : 0;
+    out.push({ i:'users', c:'#8B5CF6', t:`${BRL(ar.falta)} estão na mão de terceiros`,
+      p:`${maior ? `<strong>${esc(maior.p.name)}</strong> responde por ${BRL(maior.falta)}. ` : ''}
+         É dinheiro seu financiando o consumo de outra pessoa sem juros
+         ${pesoRenda>0 ? `— equivale a ${pesoRenda}% da sua receita do mês` : ''}.
+         Cobre antes do fechamento da fatura.` });
+  }
+  if (ar.total > 0 && ar.falta <= 0.005)
+    out.push({ i:'check', c:'#2ED3B7', t:'Terceiros em dia',
+      p:`Todo mundo já acertou o que usou do seu cartão neste mês. Os ${BRL(s.desp)}
+         da fatura incluem ${BRL(s.outros)} que já voltaram para você.` });
+
+  /* --- Pendências --- */
+  const pendMeu = sum(meus.filter(t=>t.status==='PENDENTE'));
+  if (pendMeu > 0)
+    out.push({ i:'alert', c:'#FFB020', t:`${BRL(pendMeu)} seus ainda em aberto`,
+      p:`Lançamentos marcados como pendentes em ${mkLabel(MK)}. Confirme os que já pagou
+         para o saldo refletir a realidade.` });
+
+  /* --- Futuro: separa o que é seu do que volta --- */
+  const keys = [1,2,3,4,5,6].map(i => mkAdd(nowMK(), i));
+  const futMeu  = keys.reduce((a,k)=> a + sum(outMeus(k)), 0);
+  const futTerc = keys.reduce((a,k)=> a + sum(outTerc(k)), 0);
+  if (futMeu > 0) {
+    const porMes = keys.map(k => ({ k, v: sum(outMeus(k)) }));
+    const pior = porMes.reduce((a,b)=> b.v>a.v?b:a, porMes[0]);
     out.push({ i:'calendar', c:'#5AA9F0', t:'Seus próximos 6 meses já têm dono',
-      p:`Existem <strong>${BRL(futTotal)}</strong> em parcelas e fixos já lançados. O mês mais pesado é ${mkLabel(worst.k,true)}, com ${BRL(worst.total)}. Vale evitar novos parcelamentos que caiam nele.` });
+      p:`<strong>${BRL(futMeu)}</strong> em parcelas e fixos que são seus de fato.
+         ${futTerc>0 ? `Fora esses, ${BRL(futTerc)} são de terceiros e devem voltar como reembolso. ` : ''}
+         O mês mais pesado é ${mkLabel(pior.k,true)}, com ${BRL(pior.v)} — evite novos parcelamentos que caiam nele.` });
   }
-  const terc = sum(outOf(MK).filter(t=>t.person!=='GUSTAVO'));
-  if (terc > 0)
-    out.push({ i:'users', c:'#8B5CF6', t:`${BRL(terc)} são de outras pessoas`,
-      p:`Esse valor passa no seu cartão mas não é seu gasto. Cobre em Pessoas antes do fechamento — cada dia de atraso é dinheiro seu financiando o de outro.` });
+
+  /* --- Comprometimento da renda --- */
+  const rendaMedia = (()=>{ const l = [0,1,2,3,4,5].map(i=>receitaPropria(mkAdd(MK,-i))).filter(v=>v>0);
+    return l.length ? l.reduce((a,b)=>a+b,0)/l.length : 0; })();
+  if (rendaMedia > 0 && futMeu > 0) {
+    const mensal = futMeu / 6;
+    const pct = Math.round(mensal / rendaMedia * 100);
+    if (pct >= 60)
+      out.push({ i:'alert', c:'#FF5C7A', t:`${pct}% da sua renda já está comprometida`,
+        p:`Seus compromissos próprios somam ${BRL(mensal)} por mês contra uma receita média de
+           ${BRL(rendaMedia)}. Acima de 60% sobra pouco para imprevisto — vale segurar novos parcelamentos.` });
+  }
 
   if (!out.length)
     out.push({ i:'check', c:'#2ED3B7', t:'Tudo tranquilo por aqui',
-      p:'Nenhum sinal de alerta em ' + mkLabel(MK,true) + '. Continue lançando as compras no dia em que acontecem — é o que mantém a previsão confiável.' });
+      p:`Nenhum sinal de alerta em ${mkLabel(MK,true)}. Continue lançando as compras no dia em que
+         acontecem — é o que mantém a previsão confiável.` });
 
   return out.slice(0,4);
 }
@@ -998,17 +1057,34 @@ Qualquer dúvida é só chamar. Valeu! 🙏`;
 /* ------------------------------------------- COMPROVANTE EM IMAGEM (PNG) */
 function reciboImagem(pid, items, total, jaPagou, falta) {
   const p = person(pid);
-  const W = 900, PAD = 44, ROW = 40, HEAD = 214, FOOT = 96;
+  const W = 980, PAD = 44, ROW = 40;
+  const HEAD = 214;                 // até a régua do cabeçalho de colunas
+  const CARD_TOP = 30;              // respiro ANTES do nome do cartão
+  const CARD_GAP = 26;              // respiro entre o cartão e a primeira linha
+  const CARD_END = 22;              // respiro depois do último item do cartão
+  const FOOT = 96;
+
   const byCard = sorted(groupBy(items,'card'));
-  let linhas = 0;
-  byCard.forEach(([cid]) => { linhas += 1 + items.filter(t=>t.card===cid).length; });
-  const H = HEAD + linhas*ROW + byCard.length*18 + FOOT + (jaPagou>0?54:0);
+  let alturaLinhas = 0;
+  byCard.forEach(([cid], i) => {
+    alturaLinhas += (i === 0 ? 0 : CARD_TOP) + CARD_GAP
+                  + items.filter(t=>t.card===cid).length * ROW + CARD_END;
+  });
+  const H = HEAD + alturaLinhas + FOOT + (jaPagou>0 ? 54 : 0);
 
   const cv = document.createElement('canvas');
   const dpr = 2; cv.width = W*dpr; cv.height = H*dpr;
   const x = cv.getContext('2d'); x.scale(dpr,dpr);
   const F = (w,sz,fam) => `${w} ${sz}px ${fam||'Inter, Helvetica, Arial, sans-serif'}`;
   const MONO = 'ui-monospace, Menlo, Consolas, monospace';
+  const rr = (a,b,c,d,r) => { if (x.roundRect) { x.beginPath(); x.roundRect(a,b,c,d,r); x.fill(); }
+                              else x.fillRect(a,b,c,d); };
+
+  /* colunas */
+  const C_DATA = PAD;
+  const C_DESC = PAD + 88;
+  const C_CAT  = W - PAD - 300;     // categoria
+  const C_VAL  = W - PAD;           // valor (alinhado à direita)
 
   /* fundo */
   const bg = x.createLinearGradient(0,0,W,H);
@@ -1025,7 +1101,6 @@ function reciboImagem(pid, items, total, jaPagou, falta) {
   x.fillStyle = '#9C93B8'; x.font = F(500,19);
   x.fillText(mkLabel(MK, true) + '  ·  ' + items.length + (items.length===1?' compra':' compras'), PAD, 130);
 
-  /* total */
   x.textAlign = 'right';
   x.fillStyle = '#9C93B8'; x.font = F(600,14);
   x.fillText(falta>0.005 && jaPagou>0 ? 'FALTA PAGAR' : 'TOTAL', W-PAD, 60);
@@ -1039,41 +1114,97 @@ function reciboImagem(pid, items, total, jaPagou, falta) {
   x.beginPath(); x.moveTo(PAD,164); x.lineTo(W-PAD,164); x.stroke();
 
   x.fillStyle = '#6F6688'; x.font = F(700,12);
-  x.fillText('DATA', PAD, 192); x.fillText('DESCRIÇÃO', PAD+92, 192);
-  x.textAlign='right'; x.fillText('VALOR', W-PAD, 192); x.textAlign='left';
+  x.fillText('DATA', C_DATA, 192);
+  x.fillText('DESCRIÇÃO', C_DESC, 192);
+  x.fillText('CATEGORIA', C_CAT, 192);
+  x.textAlign='right'; x.fillText('VALOR', C_VAL, 192); x.textAlign='left';
 
   /* linhas */
-  let y = HEAD + 14;
-  byCard.forEach(([cid, v]) => {
+  let y = HEAD;
+  byCard.forEach(([cid, v], idx) => {
     const c = card(cid);
-    x.fillStyle = c.c1; x.beginPath();
-    x.roundRect ? x.roundRect(PAD, y-17, 5, 22, 3) : x.rect(PAD, y-17, 5, 22); x.fill();
-    x.fillStyle = '#F1EDFA'; x.font = F(700,17);
-    x.fillText(c.name, PAD+16, y);
+    const lista = items.filter(t=>t.card===cid).sort((a,b)=>a.date.localeCompare(b.date));
+
+    if (idx > 0) {
+      y += CARD_TOP;
+      x.strokeStyle = '#2A2340'; x.lineWidth = 1;
+      x.beginPath(); x.moveTo(PAD, y-14); x.lineTo(W-PAD, y-14); x.stroke();
+    }
+
+    /* faixa do cartão */
+    x.fillStyle = 'rgba(255,255,255,.045)';
+    rr(PAD-10, y-4, W-2*PAD+20, 38, 9);
+    x.fillStyle = c.c1; rr(PAD-2, y+3, 5, 22, 3);
+
+    x.font = F(700,17);
+    const larguraNome = x.measureText(c.name).width;
+    x.fillStyle = '#F1EDFA';
+    x.fillText(c.name, PAD+14, y+20);
+    x.fillStyle = '#8E86A8'; x.font = F(500,13);
+    x.fillText(`${lista.length} ${lista.length===1?'compra':'compras'}`,
+               PAD + 14 + larguraNome + 12, y+20);
     x.textAlign='right'; x.fillStyle = '#C3B9DE'; x.font = F(700,17,MONO);
-    x.fillText(BRL(v), W-PAD, y); x.textAlign='left';
-    y += 16;
-    items.filter(t=>t.card===cid).sort((a,b)=>a.date.localeCompare(b.date)).forEach((t,i) => {
+    x.fillText(BRL(v), W-PAD, y+20); x.textAlign='left';
+
+    y += CARD_GAP;
+
+    lista.forEach((t,i) => {
       y += ROW;
-      if (i%2===0) { x.fillStyle='rgba(255,255,255,.028)';
-        x.fillRect(PAD-8, y-26, W-2*PAD+16, ROW-4); }
+      if (i%2===0) { x.fillStyle='rgba(255,255,255,.028)'; rr(PAD-10, y-26, W-2*PAD+20, ROW-4, 6); }
+
       x.fillStyle = '#8E86A8'; x.font = F(500,15,MONO);
-      x.fillText(dLabel(t.date), PAD, y);
+      x.fillText(dLabel(t.date), C_DATA, y);
+
       x.fillStyle = '#EDE9F7'; x.font = F(500,16);
       let d = t.desc || '';
-      const maxW = W - 2*PAD - 92 - 150;
-      while (x.measureText(d).width > maxW && d.length > 4) d = d.slice(0,-2);
+      const maxD = C_CAT - C_DESC - 18;
+      while (x.measureText(d).width > maxD && d.length > 4) d = d.slice(0,-2);
       if (d !== (t.desc||'')) d += '…';
-      x.fillText(d, PAD+92, y);
+      x.fillText(d, C_DESC, y);
+
+      /* categoria com etiqueta colorida */
+      const cc = cat(t.cat);
+      let nome = cc.name;
+      x.font = F(600,13);
+      const maxC = C_VAL - C_CAT - 150;
+      while (x.measureText(nome).width > maxC && nome.length > 3) nome = nome.slice(0,-2);
+      const larg = x.measureText(nome).width + 26;
+      x.fillStyle = cc.color + '2E'; rr(C_CAT, y-16, larg, 23, 11);
+      x.fillStyle = cc.color; x.beginPath(); x.arc(C_CAT+12, y-4.5, 3.6, 0, 7); x.fill();
+      x.fillStyle = cc.color; x.font = F(600,13);
+      x.fillText(nome, C_CAT+21, y);
+
       x.textAlign='right'; x.fillStyle='#F1EDFA'; x.font=F(600,16,MONO);
-      x.fillText(BRL(t.amount), W-PAD, y); x.textAlign='left';
+      x.fillText(BRL(t.amount), C_VAL, y); x.textAlign='left';
     });
-    y += 20;
+
+    y += CARD_END;
   });
 
-  /* rodapé */
-  x.strokeStyle = '#372D54';
+  /* resumo por categoria */
+  const porCat = sorted(groupBy(items,'cat')).slice(0,6);
+  x.strokeStyle = '#372D54'; x.lineWidth = 1;
   x.beginPath(); x.moveTo(PAD,y+6); x.lineTo(W-PAD,y+6); x.stroke();
+  if (porCat.length > 1) {
+    x.fillStyle = '#6F6688'; x.font = F(700,11);
+    x.fillText('POR CATEGORIA', PAD, y+30);
+    let cx = PAD;
+    x.font = F(600,13);
+    porCat.forEach(([id, val]) => {
+      const cc = cat(id);
+      const txt = `${cc.name} ${BRL(val)}`;
+      const larg = x.measureText(txt).width + 28;
+      if (cx + larg > W - PAD) return;
+      x.fillStyle = cc.color + '22'; rr(cx, y+42, larg, 26, 13);
+      x.fillStyle = cc.color; x.beginPath(); x.arc(cx+13, y+55, 3.6, 0, 7); x.fill();
+      x.fillStyle = cc.color; x.font = F(600,13);
+      x.fillText(txt, cx+22, y+59.5);
+      cx += larg + 8;
+    });
+    y += 52;
+  }
+
+  /* rodapé */
   x.fillStyle = '#6F6688'; x.font = F(500,14);
   const hoje = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});
   x.fillText('Gerado em ' + hoje, PAD, y+38);
