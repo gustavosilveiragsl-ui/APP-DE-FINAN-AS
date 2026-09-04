@@ -1,5 +1,5 @@
 /* Troque VERSION a cada atualização para forçar o refresh nos aparelhos. */
-const VERSION = 'v11-recibo-2026-08-12';
+const VERSION = 'v12-saldo-caixa-2026-09-04';
 const CACHE = 'fatura-' + VERSION;
 const ASSETS = ['./','./index.html','./app.js','./seed.js','./sync.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 

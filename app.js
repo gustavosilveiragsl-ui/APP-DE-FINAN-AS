@@ -287,8 +287,24 @@ function monthStats(k) {
   const meus = sum(o.filter(ehMeuGasto));
   const outros = desp - meus;
   const ar = contasAReceber(k);
-  return { desp, rec, pend, meus, outros, saldo: rec-desp,
-           aReceber: ar.falta, saldoPrev: rec - desp + ar.falta, n:o.length };
+
+  /* --- caixa: o que de fato entrou e saiu --- */
+  const recRecebida = sum(i.filter(t=>t.status==='PAGO'));
+  const despPaga    = sum(o.filter(t=>t.status==='PAGO'));
+  const despAberto  = desp - despPaga;
+
+  /* Despesa paga que a receita registrada não cobria: veio de fora, abate a dívida. */
+  const deFora = Math.max(0, despPaga - recRecebida);
+  /* O que sobrou da receita já recebida depois de quitar despesas. */
+  const disponivel = Math.max(0, recRecebida - despPaga);
+
+  const saldo     = rec - desp;
+  const saldoPrev = saldo + deFora + ar.falta;
+
+  return { desp, rec, pend, meus, outros, saldo, n:o.length,
+           aReceber: ar.falta,
+           recRecebida, despPaga, despAberto, deFora, disponivel,
+           saldoPrev };
 }
 /* Quanto cada pessoa deve reembolsar no mês, descontando o que já pagou */
 function recebidoDe(pid, k) {
@@ -317,11 +333,12 @@ function receitaPropria(k) {
 
 function availableToSpend(k) {
   const s = monthStats(k);
-  const ar = contasAReceber(k);
   const meta = +DB.settings.meta || 0;
-  if (meta > 0) return { limit: meta, used: s.desp, left: meta - s.desp, mode:'meta', aReceber: ar.falta };
-  const limit = s.rec + ar.falta;   // o que já entrou + o que ainda vai entrar de terceiros
-  return { limit, used: s.desp, left: limit - s.desp, mode:'receita', aReceber: ar.falta };
+  if (meta > 0) return { limit: meta, used: s.desp, left: meta - s.desp, mode:'meta',
+                         aReceber: s.aReceber, deFora: s.deFora };
+  const limit = s.rec + s.aReceber + s.deFora;
+  return { limit, used: s.desp, left: limit - s.desp, mode:'receita',
+           aReceber: s.aReceber, deFora: s.deFora };
 }
 function futureMonths(n) {
   const out = [];
@@ -454,18 +471,19 @@ function vInicio() {
   <div class="grid g-hero" id="topgrid">
     <div class="hero">
       <div class="hero-in">
-        <div class="lab">Saldo real do mês${s.aReceber>0?' · já contando o que têm a te pagar':''}</div>
+        <div class="lab">Saldo real do mês</div>
         <div class="big ${s.saldoPrev<0?'neg':'pos'}">${BRL(s.saldoPrev)}</div>
-        ${s.aReceber>0?`<div class="hero-eq">
-          <span>${BRL(s.rec)} recebido</span><b>+</b>
-          <span class="t-sk">${BRL(s.aReceber)} a receber</span><b>−</b>
-          <span class="t-out">${BRL(s.desp)} gasto</span>
-          <em>caixa hoje: ${BRL(s.saldo)}</em>
+        ${(s.aReceber>0 || s.deFora>0)?`<div class="hero-eq">
+          <span>${BRL(s.rec)} de receita</span><b>−</b>
+          <span class="t-out">${BRL(s.desp)} de despesa</span>
+          ${s.deFora>0?`<b>+</b><span class="t-am">${BRL(s.deFora)} pago por fora</span>`:''}
+          ${s.aReceber>0?`<b>+</b><span class="t-sk">${BRL(s.aReceber)} a receber</span>`:''}
         </div>`:''}
         <div class="hero-split">
-          <div><div class="l">Receitas</div><div class="v t-in">${BRL(s.rec)}</div></div>
-          <div><div class="l">Despesas</div><div class="v t-out">${BRL(s.desp)}</div></div>
-          <div><div class="l">Meus gastos</div><div class="v">${BRL(s.meus)}</div></div>
+          <div><div class="l">Ainda a pagar</div><div class="v t-out">${BRL(s.despAberto)}</div></div>
+          <div><div class="l">Já paguei</div><div class="v">${BRL(s.despPaga)}</div></div>
+          <div><div class="l">${s.disponivel>0?'Receita disponível':'Já recebi'}</div>
+            <div class="v t-in">${BRL(s.disponivel>0?s.disponivel:s.recRecebida)}</div></div>
           <div><div class="l">A receber</div><div class="v t-sk">${BRL(s.aReceber)}</div></div>
         </div>
       </div>
@@ -484,9 +502,10 @@ function vInicio() {
         </div>
         <ul class="gauge-info">
           <li><span class="k">${av.mode==='meta'?'Meta do mês':'Entradas previstas'}</span><span class="n">${BRL(av.limit)}</span></li>
-          ${av.aReceber>0&&av.mode!=='meta'?`<li><span class="k" style="padding-left:10px;font-size:12px">↳ ainda a receber</span><span class="n t-sk" style="font-size:12.5px">${BRL(av.aReceber)}</span></li>`:''}
+          ${av.aReceber>0&&av.mode!=='meta'?`<li><span class="k" style="padding-left:10px;font-size:12px">↳ de terceiros</span><span class="n t-sk" style="font-size:12.5px">${BRL(av.aReceber)}</span></li>`:''}
+          ${av.deFora>0&&av.mode!=='meta'?`<li><span class="k" style="padding-left:10px;font-size:12px">↳ pago por fora</span><span class="n t-am" style="font-size:12.5px">${BRL(av.deFora)}</span></li>`:''}
           <li><span class="k">Já gasto</span><span class="n t-out">${BRL(av.used)}</span></li>
-          <li><span class="k">Pendente</span><span class="n t-am">${BRL(s.pend)}</span></li>
+          <li><span class="k">Falta pagar</span><span class="n t-am">${BRL(s.despAberto)}</span></li>
           <li><span class="k">Comprometido</span><span class="n">${pct}%</span></li>
         </ul>
       </div>
