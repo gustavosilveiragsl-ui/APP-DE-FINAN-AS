@@ -38,6 +38,7 @@ const ICON = {
   wallet:'<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2"/>',
   chart:'<path d="M4 19V9M10 19V4M16 19v-7M22 19H2"/>',
   dots:'<circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/>',
+  lock:'<rect x="5" y="11" width="14" height="9.5" rx="2.2"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/>',
   card:'<rect x="2.5" y="5.5" width="19" height="13.5" rx="2.6"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/>',
   list:'<path d="M4 7h16M4 12h11M4 17h14"/>',
   trend:'<path d="M4 17.5 9.5 11l4 3.2L20 6"/><path d="M14.5 6H20v5.5"/>',
@@ -94,18 +95,32 @@ let DB = null;
 
 function blank() {
   return { tx: [], cards: DEF_CARDS.map(o=>({...o})), people: DEF_PEOPLE.map(o=>({...o})),
-           cats: DEF_CATS.map(o=>({...o})), settings: { seeded:false, meta:0 } };
+           cats: DEF_CATS.map(o=>({...o})), settings: { seeded:false, meta:0, mesAberto: nowMK(), fechamentos:{} } };
 }
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) { DB = Object.assign(blank(), JSON.parse(raw)); return; }
+    if (raw) {
+      DB = Object.assign(blank(), JSON.parse(raw));
+      /* Base de antes do fechamento de mês: o mês em aberto começa no mês atual e já fica gravado. */
+      if (prepararMes()) localStorage.setItem(KEY, JSON.stringify(DB));
+      return;
+    }
   } catch(e){}
   DB = blank();
   const S = window.SEED_DATA;
   const temSeed = S && ((S.despesas && S.despesas.length) || (S.receitas && S.receitas.length));
   if (temSeed) importSeed();
   save();
+}
+/* Garante o mês em aberto. Base sem ele (versão antiga) usa o que já valia neste aparelho
+   e, na falta, o mês atual. Devolve true quando precisou preencher. */
+function prepararMes(anterior) {
+  const s = DB.settings || (DB.settings = {});
+  if (!s.fechamentos) s.fechamentos = {};
+  if (s.mesAberto) return false;
+  s.mesAberto = anterior || nowMK();
+  return true;
 }
 let st = null;
 function save() {
@@ -124,7 +139,10 @@ function save() {
 /* ============================ SINCRONIZAÇÃO ============================ */
 function aplicarRemoto(row, silencioso) {
   if (!row || !row.data || !Array.isArray(row.data.tx)) return;
+  const abAntes = mesAberto();
   DB = Object.assign(blank(), row.data);
+  prepararMes(abAntes);
+  if (MK === abAntes) MK = mesAberto();   // estava no mês em aberto: acompanha se o outro aparelho fechou
   FATURA_SYNC.setVersion(row.version);
   try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch(e){}
   render(); drawNav(); pintarSync();
@@ -244,6 +262,8 @@ const BRL = v => (v<0?'-':'') + 'R$ ' + Math.abs(+v||0).toLocaleString('pt-BR',{
 const BRLk = v => BRL(v);   // valores sempre por extenso, sem abreviar
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const mk = d => (d||'').slice(0,7);
+/* Mês da conta: pode ser diferente do mês da data (comprou dia 01/11, mas é conta de outubro). */
+const mesDe = t => t.mes || mk(t.date);
 const nowMK = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); };
 const todayISO = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 function mkAdd(k, n) { const [y,m]=k.split('-').map(Number); const d=new Date(y, m-1+n, 1);
@@ -251,6 +271,9 @@ function mkAdd(k, n) { const [y,m]=k.split('-').map(Number); const d=new Date(y,
 function mkLabel(k, long) { const [y,m]=k.split('-').map(Number);
   const s = new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:long?'long':'short',year:'numeric'});
   return s.charAt(0).toUpperCase()+s.slice(1).replace('.',''); }
+function mesNome(k) { const [y,m]=k.split('-').map(Number);
+  return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long'}); }
+const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
 function dLabel(iso) { const [y,m,d]=iso.split('-').map(Number);
   return new Date(y,m-1,d).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.',''); }
 const card = id => DB.cards.find(c=>c.id===id) || {id, name:id, c1:'#6F6688', c2:'#3A3550', brand:''};
@@ -264,13 +287,17 @@ function toast(msg) {
 }
 
 /* ------------------------------------------------------------------ ESTADO */
-let MK = nowMK();
+let MK = nowMK();   // vira o mês em aberto assim que os dados carregam
 let TAB = 'inicio';
 let F = { kind:'ALL', card:'ALL', person:'ALL', cat:'ALL', status:'ALL', q:'' };
 
+/* Mês em aberto: tudo o que for lançado entra nele até você fechar.
+   Os meses antes dele estão fechados; os depois, ainda não começaram. */
+const mesAberto = () => (DB && DB.settings && DB.settings.mesAberto) || nowMK();
+
 /* -------------------------------------------------------------- SELETORES */
-const outOf   = k => DB.tx.filter(t=>t.kind==='out' && mk(t.date)===k);
-const inOf    = k => DB.tx.filter(t=>t.kind==='in'  && mk(t.date)===k);
+const outOf   = k => DB.tx.filter(t=>t.kind==='out' && mesDe(t)===k);
+const inOf    = k => DB.tx.filter(t=>t.kind==='in'  && mesDe(t)===k);
 const sum     = a => a.reduce((s,t)=>s+(+t.amount||0),0);
 function groupBy(list, key) { const m={}; list.forEach(t=>{ m[t[key]]=(m[t[key]]||0)+(+t.amount||0); }); return m; }
 function sorted(m) { return Object.entries(m).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]); }
@@ -308,7 +335,7 @@ function monthStats(k) {
 }
 /* Quanto cada pessoa deve reembolsar no mês, descontando o que já pagou */
 function recebidoDe(pid, k) {
-  return sum(DB.tx.filter(t => t.kind==='in' && t.from===pid && mk(t.date)===k));
+  return sum(DB.tx.filter(t => t.kind==='in' && t.from===pid && mesDe(t)===k));
 }
 function aReceberDe(pid, k) {
   const p = person(pid);
@@ -342,7 +369,7 @@ function availableToSpend(k) {
 }
 function futureMonths(n) {
   const out = [];
-  for (let i=1; i<=n; i++) { const k = mkAdd(nowMK(), i); out.push({ k, total: sum(outOf(k)), rec: sum(inOf(k)) }); }
+  for (let i=1; i<=n; i++) { const k = mkAdd(mesAberto(), i); out.push({ k, total: sum(outOf(k)), rec: sum(inOf(k)) }); }
   return out;
 }
 function lastMonths(n, endK) {
@@ -354,7 +381,7 @@ function lastMonths(n, endK) {
 /* Fatura: o que cai na fatura que fecha no mês k, para o cartão c */
 function faturaOf(cardId, k) {
   const c = card(cardId);
-  const list = DB.tx.filter(t => t.kind==='out' && t.card===cardId && mk(t.date)===k);
+  const list = DB.tx.filter(t => t.kind==='out' && t.card===cardId && mesDe(t)===k);
   return { total: sum(list), list, close:c.close, due:c.due };
 }
 
@@ -442,7 +469,7 @@ function moreSheet() {
 function monthbar() {
   return `<div class="monthbar">
     <button data-mv="-1">${svg('left')}</button>
-    <span class="lbl">${mkLabel(MK, true)}</span>
+    <span class="lbl">${mkLabel(MK, true)}${MK < mesAberto() ? `<span class="mlock" title="Mês fechado">${svg('lock',2.4)}</span>` : ''}</span>
     <button data-mv="1">${svg('right')}</button>
   </div>`;
 }
@@ -457,16 +484,18 @@ function vInicio() {
   const pct = av.limit>0 ? Math.min(100, Math.round(av.used/av.limit*100)) : 0;
   const byCat = sorted(groupBy(outOf(MK), 'cat'));
   const byPer = sorted(groupBy(outOf(MK), 'person'));
-  const rec = DB.tx.filter(t=>mk(t.date)===MK).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6);
-  const isNow = MK===nowMK();
+  const rec = DB.tx.filter(t=>mesDe(t)===MK).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6);
+  const isNow = MK===mesAberto();
   const ring = 2*Math.PI*52;
   const leftColor = av.left<0 ? 'var(--coral)' : av.left < av.limit*0.2 ? 'var(--amber)' : 'var(--teal)';
 
   return `
   <div class="phead">
-    <div><h1>Olá, Gustavo</h1><div class="sub">${isNow?'Seu mês até agora':'Visão de '+mkLabel(MK,true)}</div></div>
+    <div><h1>Olá, Gustavo</h1><div class="sub">${isNow?'Seu mês em aberto':'Visão de '+mkLabel(MK,true)}</div></div>
     ${monthbar()}
   </div>
+
+  ${mesStrip()}
 
   <div class="grid g-hero" id="topgrid">
     <div class="hero">
@@ -668,6 +697,12 @@ function cardTile(c) {
   </button>`;
 }
 
+/* Etiqueta quando o lançamento conta num mês diferente do da data */
+function tagMes(t) {
+  return mesDe(t)!==mk(t.date)
+    ? ` <span class="tag" title="Entra na conta de ${mesNome(mesDe(t))}">conta de ${mesNome(mesDe(t)).slice(0,3)}</span>` : '';
+}
+
 function txRow(t, act) {
   const c = cat(t.cat), p = person(t.person), cd = card(t.card);
   const isIn = t.kind==='in';
@@ -679,7 +714,7 @@ function txRow(t, act) {
         <div class="tt">${esc(t.desc||c.name)}</div>
         <div class="ss">
           <span class="dot" style="background:${cd.c1}"></span>${esc(cd.name)}
-          ${!isIn?`· ${esc(p.name)}`:''} · ${dLabel(t.date)}
+          ${!isIn?`· ${esc(p.name)}`:''} · ${dLabel(t.date)}${tagMes(t)}
           ${t.of?`<span class="tag parc">${t.n}/${t.of}</span>`:''}
           <span class="tag ${pend?'pend':'pago'}">${pend?'pendente':'pago'}</span>
         </div>
@@ -769,7 +804,7 @@ function tips() {
          para o saldo refletir a realidade.` });
 
   /* --- Futuro: separa o que é seu do que volta --- */
-  const keys = [1,2,3,4,5,6].map(i => mkAdd(nowMK(), i));
+  const keys = [1,2,3,4,5,6].map(i => mkAdd(mesAberto(), i));
   const futMeu  = keys.reduce((a,k)=> a + sum(outMeus(k)), 0);
   const futTerc = keys.reduce((a,k)=> a + sum(outTerc(k)), 0);
   if (futMeu > 0) {
@@ -803,7 +838,7 @@ function tips() {
 
 /* ========================================================== VIEW: EXTRATO */
 function vExtrato() {
-  let list = DB.tx.filter(t => mk(t.date)===MK);
+  let list = DB.tx.filter(t => mesDe(t)===MK);
   if (F.kind!=='ALL')   list = list.filter(t=>t.kind===F.kind);
   if (F.card!=='ALL')   list = list.filter(t=>t.card===F.card);
   if (F.person!=='ALL') list = list.filter(t=>t.person===F.person);
@@ -877,7 +912,7 @@ function txTable(t) {
     <td>${isIn?'<span style="color:var(--teal)">Receita</span>':esc(c.name)}</td>
     <td><span class="dot" style="background:${cd.c1};margin-right:6px"></span>${esc(cd.name)}</td>
     <td>${isIn?'—':esc(p.name)}</td>
-    <td>${dLabel(t.date)}</td>
+    <td>${dLabel(t.date)}${tagMes(t)}</td>
     <td><span class="tag ${t.status==='PENDENTE'?'pend':'pago'}">${t.status==='PENDENTE'?'pendente':'pago'}</span></td>
     <td class="n" style="color:${isIn?'var(--teal)':'var(--text)'}">${isIn?'+':'−'} ${BRL(t.amount)}</td>
     <td style="text-align:right;white-space:nowrap">
@@ -1249,7 +1284,7 @@ function vPrevisao() {
   const fut = futureMonths(12);
   const max = Math.max(1, ...fut.map(f=>f.total));
   const total12 = fut.reduce((a,b)=>a+b.total,0);
-  const parcelasAbertas = DB.tx.filter(t=>t.kind==='out' && t.of>1 && t.date > todayISO());
+  const parcelasAbertas = DB.tx.filter(t=>t.kind==='out' && t.of>1 && mesDe(t) >= mesAberto() && t.status==='PENDENTE');
   const grupos = {};
   parcelasAbertas.forEach(t => { const base=(t.desc||'').replace(/\s*\(\d+\/\d+\)\s*$/,'');
     if(!grupos[base]) grupos[base]={desc:base, rest:0, count:0, next:t.date, cat:t.cat, person:t.person, card:t.card, of:t.of};
@@ -1467,10 +1502,115 @@ function vConfig() {
   </div>`;
 }
 
+/* ------------------------------------------------------- FECHAMENTO DO MÊS */
+/* Faixa do Início: diz qual mês está recebendo os lançamentos e oferece fechar ou reabrir. */
+function mesStrip() {
+  const ab = mesAberto();
+  if (MK < ab) {
+    const f = DB.settings.fechamentos && DB.settings.fechamentos[MK];
+    return `<div class="mstrip fech">${svg('lock')}
+      <div class="ms-t"><strong>${cap(mesNome(MK))} está fechado</strong>
+        <span>${f && f.em ? `Fechado em ${dLabel(f.em)}. ` : ''}O que você lançar agora vai para ${mesNome(ab)}.</span></div>
+      <button class="btn btn-sm btn-g" id="mReabrir">Reabrir ${mesNome(MK)}</button></div>`;
+  }
+  if (MK > ab) {
+    return `<div class="mstrip">${svg('calendar')}
+      <div class="ms-t"><strong>${cap(mesNome(ab))} ainda está aberto</strong>
+        <span>Os lançamentos novos entram em ${mesNome(ab)}. Feche ${mesNome(ab)} para passar para o mês seguinte.</span></div>
+      <button class="btn btn-sm" id="mIrAberto">Ir para ${mesNome(ab)}</button></div>`;
+  }
+  const pend = outOf(ab).filter(t=>t.status==='PENDENTE');
+  const virou = nowMK() > ab;
+  const tudoPago = !pend.length && outOf(ab).length > 0;
+  const falta = pend.length
+    ? `${pend.length} ${pend.length===1?'despesa pendente':'despesas pendentes'} · ${BRL(sum(pend))}.` : 'Nada pendente.';
+  const [cls, ic, titulo, linha] =
+      virou    ? ['warn', 'alert', `O mês virou, mas ${mesNome(ab)} continua aberto`,
+                  `O que você lançar vai para ${mesNome(ab)} até você fechar. ${falta}`]
+    : tudoPago ? ['ok', 'check', `Tudo de ${mesNome(ab)} está pago`,
+                  `Pode fechar o mês: daí em diante tudo entra em ${mesNome(mkAdd(ab,1))}.`]
+    :            ['', 'calendar', `${cap(mesNome(ab))} está aberto`,
+                  `Os lançamentos novos entram aqui até você fechar o mês. ${falta}`];
+  return `<div class="mstrip ${cls}">${svg(ic)}
+    <div class="ms-t"><strong>${titulo}</strong><span>${linha}</span></div>
+    <button class="btn btn-sm ${cls?'btn-p':''}" id="mFechar">${svg('lock')}Fechar ${mesNome(ab)}</button></div>`;
+}
+
+function fecharMes() {
+  const k = mesAberto(), prox = mkAdd(k, 1);
+  const s = monthStats(k);
+  const pend = outOf(k).filter(t=>t.status==='PENDENTE');
+  const recPend = inOf(k).filter(t=>t.status==='PENDENTE');
+  const aviso = pend.length || recPend.length || s.aReceber > 0.005;
+  openModal(`<div class="mhead"><h2>Fechar ${mesNome(k)}?</h2><button class="ibtn" data-close>${svg('x')}</button></div>
+    <ul class="gauge-info" style="margin-bottom:16px">
+      <li><span class="k">Receitas</span><span class="n t-in">${BRL(s.rec)}</span></li>
+      <li><span class="k">Despesas</span><span class="n t-out">${BRL(s.desp)}</span></li>
+      <li><span class="k">Saldo real do mês</span><span class="n" style="color:${s.saldoPrev<0?'var(--coral)':'var(--teal)'}">${BRL(s.saldoPrev)}</span></li>
+    </ul>
+    ${aviso ? `<div class="mavis">
+      ${pend.length?`<p><strong>${pend.length} ${pend.length===1?'despesa ainda pendente':'despesas ainda pendentes'}</strong> · ${BRL(sum(pend))}</p>`:''}
+      ${recPend.length?`<p><strong>${recPend.length} ${recPend.length===1?'receita ainda não recebida':'receitas ainda não recebidas'}</strong> · ${BRL(sum(recPend))}</p>`:''}
+      ${s.aReceber>0.005?`<p><strong>${BRL(s.aReceber)}</strong> ainda a receber de terceiros</p>`:''}
+      <p class="d">Pode fechar assim mesmo: o que estiver pendente continua em ${mesNome(k)} e você marca como pago depois.</p>
+    </div>` : `<p style="font-size:13.5px;color:var(--teal);margin:0 0 12px">Tudo pago e recebido.</p>`}
+    <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0">
+      Depois de fechar, tudo o que você lançar vai para <strong style="color:var(--text)">${mesNome(prox)}</strong>.
+      Se precisar, dá para reabrir.</p>
+    <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+      <button class="btn btn-p" id="fYes">Fechar ${mesNome(k)}</button></div>`);
+  document.getElementById('fYes').onclick = ()=>{
+    DB.settings.fechamentos = DB.settings.fechamentos || {};
+    DB.settings.fechamentos[k] = { em: todayISO(), receitas: s.rec, despesas: s.desp, saldo: s.saldoPrev, pendentes: pend.length };
+    DB.settings.mesAberto = prox;
+    MK = prox; save(); closeModal(); render();
+    toast(`${cap(mesNome(k))} fechado. Agora tudo entra em ${mesNome(prox)}.`);
+  };
+}
+
+/* Reabrir volta o mês em aberto para k; os meses fechados depois dele reabrem junto. */
+function reabrirMes(k) {
+  const ab = mesAberto();
+  if (k >= ab) return;
+  const depois = []; for (let x = mkAdd(k,1); x < ab; x = mkAdd(x,1)) depois.push(x);
+  openModal(`<div class="mhead"><h2>Reabrir ${mesNome(k)}?</h2><button class="ibtn" data-close>${svg('x')}</button></div>
+    <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 8px">
+      Os lançamentos novos voltam a ir para <strong style="color:var(--text)">${mesNome(k)}</strong> até você fechar de novo.</p>
+    ${depois.length?`<p style="font-size:13px;color:var(--amber);line-height:1.55;margin:0 0 8px">
+      ${depois.length===1 ? `${cap(mesNome(depois[0]))} também volta a ficar aberto`
+        : `De ${mesNome(depois[0])} a ${mesNome(depois[depois.length-1])} também voltam a ficar abertos`} — depois você fecha um de cada vez.</p>`:''}
+    <p style="font-size:12.5px;color:var(--dim);margin:0">Nenhum lançamento muda de mês.</p>
+    <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
+      <button class="btn btn-p" id="rYes">Reabrir</button></div>`);
+  document.getElementById('rYes').onclick = ()=>{
+    const f = DB.settings.fechamentos || {};
+    [k, ...depois].forEach(x => { delete f[x]; });
+    DB.settings.mesAberto = k;
+    MK = k; save(); closeModal(); render();
+    toast(`${cap(mesNome(k))} reaberto`);
+  };
+}
+
 /* ================================================== LANÇAMENTO (MODAL) */
 function txModal(kind, opts) {
   let K = kind || 'out';
-  let sel = { cat:'DIVERSOS', card:'NUBANK', person:'GUSTAVO', parc:1, mode:'total', from: (opts&&opts.from)||'' };
+  let sel = { cat:'DIVERSOS', card:'NUBANK', person:'GUSTAVO', parc:1, mode:'total', from: (opts&&opts.from)||'',
+              mes:null };   // mes null = automático
+  let dataAtual = todayISO();
+  const AB = mesAberto();
+  /* Sem escolha: vai para o mês em aberto; data marcada mais para frente leva o lançamento junto. */
+  const mesAuto = () => { const d = mk(dataAtual); return d > mkAdd(AB,1) ? d : AB; };
+  const mesEscolhido = () => sel.mes || mesAuto();
+  const nomeMes = k => cap(mesNome(k)) + (k.slice(0,4)!==AB.slice(0,4) ? ' '+k.slice(0,4) : '');
+  const mesField = () => {
+    const virou = nowMK() > AB, esc_ = mesEscolhido();
+    const ops = [...new Set([AB, mkAdd(AB,1), mk(dataAtual), esc_])].sort();
+    return `<div class="fld ${virou?'mpergunta':''}">
+      <label>${virou ? `O mês virou e ${mesNome(AB)} ainda está aberto. Esse lançamento é de qual mês?` : 'Entra na conta de'}</label>
+      <div class="seg mes">${ops.map(k=>`<button type="button" data-mes="${k}" class="${k===esc_?'on':''}">
+        <span>${nomeMes(k)}</span><small>${k<AB?'fechado':k===AB?'aberto':'próximo'}</small></button>`).join('')}</div>
+    </div>`;
+  };
 
   const body = () => `
     <div class="mhead"><h2>${K==='in'?'Nova receita':'Novo lançamento'}</h2>
@@ -1537,7 +1677,7 @@ function txModal(kind, opts) {
       <input type="number" min="1" max="36" id="tRep" value="12"></div>`}
 
     <div class="frow">
-      <div class="fld"><label>Data</label><input type="date" id="tDate" value="${todayISO()}"></div>
+      <div class="fld"><label>Data</label><input type="date" id="tDate" value="${dataAtual}"></div>
       ${K==='out'?`<div class="fld"><label>Status</label>
         <div style="display:flex;align-items:center;gap:9px;background:var(--ink);border:1px solid var(--line);
           padding:12px 13px;border-radius:11px;font-size:14px;color:var(--amber);font-weight:600">
@@ -1545,6 +1685,8 @@ function txModal(kind, opts) {
           <span style="color:var(--dim);font-size:12px;font-weight:500">marque como pago depois, no extrato</span>
         </div></div>`:''}
     </div>
+
+    <div id="mesWrap">${mesField()}</div>
 
     <div class="macts">
       <button class="btn btn-g" data-close>Cancelar</button>
@@ -1584,7 +1726,15 @@ function txModal(kind, opts) {
       M.querySelectorAll('[data-fx]').forEach(x=>x.classList.toggle('on', x===b));
       const rw=document.getElementById('repWrap'); if(rw) rw.style.display = b.dataset.fx==='1'?'block':'none'; });
     const amt = document.getElementById('tAmt'); if (amt) amt.oninput = prev;
+    const dt = document.getElementById('tDate');
+    if (dt) dt.oninput = dt.onchange = () => { dataAtual = dt.value || todayISO(); pintaMes(); prev(); };
+    bindMes();
     document.getElementById('tSave').onclick = commit;
+  }
+  function pintaMes() { const w = document.getElementById('mesWrap'); if (w) { w.innerHTML = mesField(); bindMes(); } }
+  function bindMes() {
+    document.querySelectorAll('#mesWrap [data-mes]').forEach(b => b.onclick = () => {
+      sel.mes = b.dataset.mes; pintaMes(); prev(); });
   }
   function prev() {
     const el = document.getElementById('parcPrev'); if (!el) return;
@@ -1592,26 +1742,28 @@ function txModal(kind, opts) {
     if (sel.parc<2 || !v) { el.textContent=''; return; }
     const each = sel.mode==='total' ? v/sel.parc : v;
     const tot  = sel.mode==='total' ? v : v*sel.parc;
-    el.innerHTML = `<strong>${sel.parc}x de ${BRL(each)}</strong> · total ${BRL(tot)} · última em ${mkLabel(mkAdd(mk(document.getElementById('tDate').value||todayISO()), sel.parc-1), true)}`;
+    el.innerHTML = `<strong>${sel.parc}x de ${BRL(each)}</strong> · total ${BRL(tot)} · última em ${mkLabel(mkAdd(mesEscolhido(), sel.parc-1), true)}`;
   }
   function commit() {
     const v = parseFloat(document.getElementById('tAmt').value);
     if (!v || v<=0) { toast('Informe um valor'); return; }
     const desc = (document.getElementById('tDesc').value||'').trim();
     const date = document.getElementById('tDate').value || todayISO();
+    dataAtual = date;
+    const comp = mesEscolhido();
 
     if (K==='in') {
       const isFix = document.querySelector('[data-fx="1"]').classList.contains('on');
       const rep = isFix ? Math.max(1, Math.min(36, +document.getElementById('tRep').value||12)) : 1;
       const [y,m,d] = date.split('-').map(Number);
       for (let i=0;i<rep;i++) {
-        const k = mkAdd(mk(date), i);
-        DB.tx.push({ id:uid(), kind:'in', date:k+'-'+String(Math.min(d,28)).padStart(2,'0'),
+        const k = mkAdd(comp, i);
+        DB.tx.push({ id:uid(), kind:'in', mes:k, date: i===0 ? date : k+'-'+String(Math.min(d,28)).padStart(2,'0'),
           desc:desc||(sel.from?('Reembolso '+person(sel.from).name):'Receita'), amount:v, card:sel.card,
           person:'GUSTAVO', from:sel.from||'', cat:'RECEITA', status:'PENDENTE', fixed:isFix });
       }
       save(); closeModal(); render();
-      toast(rep>1 ? `Receita fixa lançada por ${rep} meses` : 'Receita lançada');
+      toast(rep>1 ? `Receita fixa lançada por ${rep} meses a partir de ${mesNome(comp)}` : `Receita lançada em ${mesNome(comp)}`);
       return;
     }
 
@@ -1621,14 +1773,14 @@ function txModal(kind, opts) {
     const grp = n>1 ? uid() : null;
     const [y,m,d] = date.split('-').map(Number);
     for (let i=0;i<n;i++) {
-      const k = mkAdd(mk(date), i);
-      DB.tx.push({ id:uid(), kind:'out', date:k+'-'+String(Math.min(d,28)).padStart(2,'0'),
+      const k = mkAdd(comp, i);
+      DB.tx.push({ id:uid(), kind:'out', mes:k, date: i===0 ? date : k+'-'+String(Math.min(d,28)).padStart(2,'0'),
         desc: n>1 ? `${desc||cat(sel.cat).name} (${i+1}/${n})` : (desc||cat(sel.cat).name),
         amount:each, card:sel.card, person:sel.person, cat:sel.cat,
         status: status, tipo:'FISICA', n:n>1?i+1:null, of:n>1?n:null, grp });
     }
     save(); closeModal(); render();
-    toast(n>1 ? `${n} parcelas de ${BRL(each)} lançadas` : 'Lançamento salvo');
+    toast(n>1 ? `${n} parcelas de ${BRL(each)} a partir de ${mesNome(comp)}` : `Lançamento salvo em ${mesNome(comp)}`);
   }
 
   openModal(''); paint();
@@ -1670,6 +1822,7 @@ function txDetail(id) {
       ${isIn?'':`<li><span class="k">Pessoa</span><span class="n">${esc(p.name)}</span></li>
       <li><span class="k">Categoria</span><span class="n">${esc(c.name)}</span></li>`}
       <li><span class="k">Status</span><span class="n" style="color:${t.status==='PAGO'?'var(--teal)':'var(--amber)'}">${t.status==='PAGO'?'pago':'pendente'}</span></li>
+      <li><span class="k">Mês da conta</span><span class="n">${mkLabel(mesDe(t),true)}</span></li>
       ${multi?`<li><span class="k">Total do parcelamento</span><span class="n">${BRL(totalG)} em ${g.length}x</span></li>`:''}
     </ul>
 
@@ -1703,7 +1856,7 @@ function confirmDelGroup(g) {
     <p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 6px">
       Isso apaga <strong style="color:var(--text)">${esc(baseDesc(g[0].desc))}</strong> por completo —
       as ${g.length} parcelas, somando <strong style="color:var(--text)">${BRL(sum(g))}</strong>,
-      de ${mkLabel(mk(g.map(x=>x.date).sort()[0]),true)} até ${mkLabel(mk(g.map(x=>x.date).sort().slice(-1)[0]),true)}.</p>
+      de ${mkLabel(g.map(mesDe).sort()[0],true)} até ${mkLabel(g.map(mesDe).sort().slice(-1)[0],true)}.</p>
     ${pagos?`<p style="font-size:13px;color:var(--amber);margin:0 0 6px">${pagos} ${pagos===1?'parcela já está marcada':'parcelas já estão marcadas'} como paga.</p>`:''}
     <p style="font-size:12.5px;color:var(--dim);margin:0">Não tem como desfazer.</p>
     <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
@@ -1747,6 +1900,11 @@ function txEdit(id) {
     <div class="fld"><label>Data${multi?' da parcela atual (as outras acompanham o mês)':''}</label>
       <input type="date" id="eDate" value="${t.date}"></div>
 
+    <div class="fld"><label>Entra na conta de${multi?' (as outras parcelas acompanham)':''}</label>
+      <div class="monthbar mpick"><button type="button" data-em="-1">${svg('left')}</button>
+        <span class="lbl" id="eMes">${mkLabel(mesDe(t),true)}</span>
+        <button type="button" data-em="1">${svg('right')}</button></div></div>
+
     <div class="macts"><button class="btn btn-g" data-close>Cancelar</button>
       <button class="btn btn-p" id="eSave">Salvar</button></div>`);
 
@@ -1761,6 +1919,13 @@ function txEdit(id) {
   M.querySelectorAll('[data-ect]').forEach(b=>b.onclick=()=>{ ng=b.dataset.ect;
     M.querySelectorAll('[data-ect]').forEach(x=>x.classList.toggle('on',x===b)); });
 
+  let nm = mesDe(t), dAntes = t.date;
+  const pintaEMes = () => { document.getElementById('eMes').textContent = mkLabel(nm, true); };
+  M.querySelectorAll('[data-em]').forEach(b=>b.onclick=()=>{ nm = mkAdd(nm, +b.dataset.em); pintaEMes(); });
+  /* Mudou a data para outro mês e o mês da conta acompanhava a data: continua acompanhando. */
+  document.getElementById('eDate').onchange = e => { const v = e.target.value; if (!v) return;
+    if (nm === mk(dAntes)) { nm = mk(v); pintaEMes(); } dAntes = v; };
+
   document.getElementById('eSave').onclick = ()=>{
     const nd = document.getElementById('eDesc').value.trim();
     const na = parseFloat(document.getElementById('eAmt').value);
@@ -1769,12 +1934,15 @@ function txEdit(id) {
     const targets = all ? g : [t];
     const day = ndt.slice(8);
     const shift = all ? mDiff(mk(t.date), mk(ndt)) : 0;
+    const mshift = mDiff(mesDe(t), nm);
     targets.forEach(x => {
       x.card = nc; if (!isIn) { x.person = np; x.cat = ng; }
       x.amount = na;
       if (nd) x.desc = x.of>1 ? `${nd} (${x.n}/${x.of})` : nd;
+      const novoMes = mkAdd(mesDe(x), mshift);   // antes de mexer na data, que é o mês de quem não tem mes
       if (all) { x.date = mkAdd(mk(x.date), shift)+'-'+day; }
       else x.date = ndt;
+      x.mes = novoMes;
     });
     save(); closeModal(); render();
     toast(all && multi ? `${targets.length} parcelas atualizadas` : 'Lançamento atualizado');
@@ -2015,8 +2183,8 @@ function exportJson() {
   toast('Backup exportado');
 }
 function exportCsv() {
-  const head = 'tipo,data,descricao,valor,cartao,pessoa,categoria,status,parcela\n';
-  const rows = DB.tx.map(t=>[t.kind==='in'?'RECEITA':'DESPESA', t.date, '"'+(t.desc||'').replace(/"/g,'""')+'"',
+  const head = 'tipo,data,mes_da_conta,descricao,valor,cartao,pessoa,categoria,status,parcela\n';
+  const rows = DB.tx.map(t=>[t.kind==='in'?'RECEITA':'DESPESA', t.date, mesDe(t), '"'+(t.desc||'').replace(/"/g,'""')+'"',
     String(t.amount).replace('.',','), card(t.card).name, person(t.person).name,
     t.kind==='in'?'RECEITA':cat(t.cat).name, t.status, t.of?`${t.n}/${t.of}`:''].join(',')).join('\n');
   download(`fatura-${todayISO()}.csv`, '\ufeff'+head+rows, 'text/csv;charset=utf-8');
@@ -2028,7 +2196,9 @@ function importJson(file) {
     try {
       const o = JSON.parse(r.result);
       if (!o || !Array.isArray(o.tx)) throw 0;
-      DB = Object.assign(blank(), o); save(); render(); drawNav();
+      const abAntes = mesAberto();
+      DB = Object.assign(blank(), o); prepararMes(abAntes); MK = mesAberto();
+      save(); render(); drawNav();
       toast(`${DB.tx.length} lançamentos restaurados`);
     } catch(e){ toast('Arquivo inválido. Use um backup exportado pelo app.'); }
   };
@@ -2051,6 +2221,9 @@ function wire(el) {
   bindMonth(el);
   bindStack(el);
   el.querySelectorAll('[data-go2]').forEach(b=>b.onclick=()=>go(b.dataset.go2));
+  const mf = el.querySelector('#mFechar');   if (mf) mf.onclick = fecharMes;
+  const mre = el.querySelector('#mReabrir'); if (mre) mre.onclick = ()=>reabrirMes(MK);
+  const mia = el.querySelector('#mIrAberto'); if (mia) mia.onclick = ()=>{ MK = mesAberto(); render(); };
   el.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{ F.card=b.dataset.card; go('extrato'); });
   el.querySelectorAll('[data-wa]').forEach(b=>b.onclick=()=>waMessage(b.dataset.wa));
   el.querySelectorAll('[data-recv]').forEach(b=>b.onclick=()=>{
@@ -2082,7 +2255,7 @@ function wire(el) {
     if (F.kind==='in') { F.person='ALL'; F.cat='ALL'; } render(); });
 
   const batch = (to) => {
-    let list = DB.tx.filter(t => mk(t.date)===MK);
+    let list = DB.tx.filter(t => mesDe(t)===MK);
     if (F.kind!=='ALL')   list = list.filter(t=>t.kind===F.kind);
     if (F.card!=='ALL')   list = list.filter(t=>t.card===F.card);
     if (F.person!=='ALL') list = list.filter(t=>t.person===F.person);
@@ -2167,6 +2340,7 @@ document.getElementById('ov').onclick = e => { if (e.target.id==='ov') closeModa
 document.addEventListener('keydown', e => { if (e.key==='Escape') closeModal(); });
 
 load();
+MK = mesAberto();
 drawNav();
 document.getElementById('v-inicio').classList.add('on');
 render();

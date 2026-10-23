@@ -324,6 +324,27 @@ td.n{font-family:'JetBrains Mono',monospace;font-weight:700;text-align:right}
 .bb-txt strong{color:var(--text)}
 .bb-txt svg{width:17px;height:17px;color:var(--amber);flex-shrink:0}
 .bb-acts{display:flex;gap:8px;flex-wrap:wrap}
+/* ============ MÊS EM ABERTO / FECHAMENTO ============ */
+.mstrip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line-soft);
+  border-radius:14px;padding:12px 15px;margin-bottom:16px}
+.mstrip>svg{width:18px;height:18px;flex-shrink:0;color:var(--violet)}
+.mstrip .ms-t{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px;font-size:12.5px;color:var(--muted);line-height:1.45}
+.mstrip .ms-t strong{color:var(--text);font-size:13.5px}
+.mstrip.warn{background:linear-gradient(100deg,rgba(255,176,32,.13),rgba(255,176,32,.04));border-color:rgba(255,176,32,.32)}
+.mstrip.warn>svg,.mstrip.fech>svg{color:var(--amber)}
+.mstrip.ok{background:linear-gradient(100deg,rgba(46,211,183,.13),rgba(46,211,183,.04));border-color:rgba(46,211,183,.32)}
+.mstrip.ok>svg{color:var(--teal)}
+@media(max-width:880px){.mstrip .btn{width:100%;justify-content:center}}
+.monthbar .mlock{display:inline-grid;vertical-align:-2px;margin-left:6px;color:var(--amber)}
+.monthbar .mlock svg{width:12px;height:12px}
+.monthbar.mpick{justify-content:space-between;border-radius:12px;background:var(--ink);border-color:var(--line)}
+.mpergunta{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.3);border-radius:12px;padding:12px}
+.mpergunta label{color:var(--amber);text-transform:none;letter-spacing:0;font-size:13px;line-height:1.45}
+.seg.mes button{display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 6px}
+.seg.mes small{font-size:10.5px;font-weight:600;opacity:.75}
+.mavis{background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.3);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+.mavis p{margin:0 0 4px;font-size:13px;color:var(--amber);line-height:1.5}
+.mavis p.d{color:var(--muted);font-size:12px;margin:6px 0 0}
 @media(max-width:880px){.batchbar{padding:11px 13px}.bb-txt{font-size:12.5px}
   .bb-acts{width:100%}.bb-acts .btn{flex:1;justify-content:center}}
 .filters{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:15px;align-items:center}
